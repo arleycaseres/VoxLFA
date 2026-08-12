@@ -12,6 +12,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 use tokio::sync::broadcast;
+use voxlfa_core::analysis::AnalysisHandle;
 use voxlfa_core::audio::{AudioEngine, AudioEngineConfig, DspHandle, EngineHandle};
 use voxlfa_core::protocol::{DspState, EngineEvent, EngineStatus, LevelSample};
 
@@ -33,6 +34,8 @@ pub type FrontendCallback = dyn Fn(&EngineEvent) + Send + Sync;
 pub struct EngineManager {
     handle: Option<EngineHandle>,
     dsp: Option<DspHandle>,
+    /// Mango de consulta del análisis vocal (métricas, resumen, sugerencias).
+    analysis: Option<AnalysisHandle>,
     /// Último estado conocido del motor (para consultas de la UI).
     status: Arc<Mutex<Option<EngineStatus>>>,
     /// Último nivel medido (renderizado inicial de la UI).
@@ -49,6 +52,7 @@ impl EngineManager {
         Self {
             handle: None,
             dsp: None,
+            analysis: None,
             status: Arc::new(Mutex::new(None)),
             level: Arc::new(Mutex::new(None)),
             dsp_state: Arc::new(Mutex::new(None)),
@@ -81,6 +85,11 @@ impl EngineManager {
         self.dsp.as_ref()
     }
 
+    /// Mango de consulta del análisis vocal (si el motor está corriendo).
+    pub fn analysis_handle(&self) -> Option<&AnalysisHandle> {
+        self.analysis.as_ref()
+    }
+
     /// Arranca el motor con la configuración indicada.
     ///
     /// `on_frontend` es un callback opcional que se invoca con cada evento
@@ -98,7 +107,7 @@ impl EngineManager {
         }
 
         let (tx, rx) = mpsc::channel();
-        let (handle, dsp) = AudioEngine::start(config, tx)?;
+        let (handle, dsp, analysis) = AudioEngine::start(config, tx)?;
 
         // Hilo forwarder: canal del motor → UI + WebSocket.
         let status = self.status.clone();
@@ -144,6 +153,7 @@ impl EngineManager {
 
         self.handle = Some(handle);
         self.dsp = Some(dsp);
+        self.analysis = Some(analysis);
         Ok(())
     }
 
@@ -153,6 +163,8 @@ impl EngineManager {
     /// flag cada ~200 ms y cierra los streams); no bloquea la UI.
     pub fn stop(&mut self) {
         self.dsp = None;
+        // El mango de análisis se conserva: el resumen de sesión se consulta
+        // tras detener el motor.
         if let Some(handle) = self.handle.take() {
             handle.request_stop();
             let _ = thread::Builder::new()

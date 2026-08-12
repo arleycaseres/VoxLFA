@@ -43,15 +43,28 @@ debajo del umbral perceptible objetivo del plan.
 > fino por banda de EQ (actualmente los parámetros son fijos por preset) y el
 > asistente de IA.
 
-## Fase 2 — IA: asistente vocal
+## Fase 2 — IA: asistente vocal ✅ (bloques 1-4)
 
 Objetivo: la IA analiza la voz y sugiere ajustes sin fricción.
 
-- [ ] Motor de análisis en `voxlfa-core` (offline o local, sin nube).
-- [ ] Sugerencias en tiempo real (timbre, dinámica, fatiga, resonancia).
-- [ ] Generación de presets a partir de las sugerencias (con confirmación).
-- [ ] Resúmenes de sesión exportables.
+- [x] Motor de análisis en `voxlfa-core` (100 % local, sin nube ni FFT):
+      divisor de bandas con biquads en el callback (O(n), sin asignación),
+      ventana deslizante de métricas, seguimiento de sesión y reglas
+      heurísticas de sugerencias en un hilo dedicado.
+- [x] Sugerencias en tiempo real (timbre, dinámica, fatiga, resonancia) emitidas
+      como `EngineEvent::Analysis` y mostradas en la cabina.
+- [x] Aplicación de sugerencias con confirmación (`apply_suggestion`: aplica el
+      preset sugerido en vivo) y resumen de sesión exportable a JSON.
+- [x] El móvil muestra el análisis y las sugerencias en modo solo lectura.
 - [ ] Control del motor desde el móvil (con autenticación mutua de dispositivos).
+
+Entregable: la cabina muestra métricas de voz en vivo (brillo, resonancia,
+fatiga, dinámica), sugiere ajustes con botón "Aplicar" que reconfigura la cadena
+en vivo, y permite exportar el resumen de la sesión a JSON. El móvil refleja el
+análisis en modo monitoreo.
+
+> Pendiente de la Fase 2: el bloque 5 (control del motor desde el móvil con
+> autenticación mutua) se dejó fuera de esta tanda por decisión de producto.
 
 ## Fase 3+ — Pulido y distribución
 

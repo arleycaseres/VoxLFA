@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type {
+  AnalysisSample,
   DeviceList,
   DspState,
   EngineEvent,
@@ -12,14 +13,18 @@ import type {
   LevelSample,
   PresetId,
   PresetInfo,
+  SessionSummary,
 } from "../lib/types";
 import {
   applyPreset,
+  applySuggestion,
+  getAnalysis,
   getDspState,
   getEngineStatus,
   getLastLevel,
   getPairingInfo,
   getPresets,
+  getSessionSummary,
   listDevices,
   onEngineEvent,
   setGlobalBypass,
@@ -42,6 +47,10 @@ export interface EngineController {
   presets: PresetInfo[] | null;
   /** Último estado de la cadena DSP (o `null` si el motor no corre). */
   dsp: DspState | null;
+  /** Última muestra de análisis vocal (métricas + sugerencias de IA). */
+  analysis: AnalysisSample | null;
+  /** Resumen acumulado de la sesión en curso (o `null`). */
+  sessionSummary: SessionSummary | null;
   /** Mensaje del último aviso (o `null`). */
   warning: string | null;
   /** Error de la última operación (o `null`). */
@@ -65,6 +74,10 @@ export interface EngineController {
   setGlobalBypass: (bypass: boolean) => Promise<void>;
   /** Cambia el bypass de un módulo por su nombre. */
   setLinkBypass: (link: string, bypass: boolean) => Promise<void>;
+  /** Aplica la acción de una sugerencia (con confirmación del usuario). */
+  applySuggestion: (suggestionId: number) => Promise<void>;
+  /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
+  refreshSessionSummary: () => Promise<void>;
 }
 
 /**
@@ -78,6 +91,10 @@ export function useEngine(): EngineController {
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   const [presets, setPresets] = useState<PresetInfo[] | null>(null);
   const [dsp, setDsp] = useState<DspState | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisSample | null>(null);
+  const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(
+    null,
+  );
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -141,6 +158,23 @@ export function useEngine(): EngineController {
     }
   }, []);
 
+  const applySuggestionAction = useCallback(async (suggestionId: number) => {
+    try {
+      await applySuggestion(suggestionId);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const refreshSessionSummary = useCallback(async () => {
+    try {
+      const summary = await getSessionSummary();
+      if (summary) setSessionSummary(summary);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
   // Carga inicial + suscripción de eventos.
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +197,13 @@ export function useEngine(): EngineController {
             links: event.links,
           });
           break;
+        case "analysis":
+          setAnalysis({
+            metrics: event.metrics,
+            suggestions: event.suggestions,
+            capturedAtMs: event.capturedAtMs,
+          });
+          break;
         case "warning":
           setWarning(event.message);
           break;
@@ -172,12 +213,13 @@ export function useEngine(): EngineController {
     const unsubscribe = onEngineEvent(applyEvent).catch(() => undefined);
 
     (async () => {
-      const [status, level, pairing, presets, dsp] = await Promise.allSettled([
+      const [status, level, pairing, presets, dsp, analysis] = await Promise.allSettled([
         getEngineStatus(),
         getLastLevel(),
         getPairingInfo(),
         getPresets(),
         getDspState(),
+        getAnalysis(),
       ]);
       if (cancelled) return;
       if (status.status === "fulfilled") setStatus(status.value);
@@ -186,6 +228,8 @@ export function useEngine(): EngineController {
       if (presets.status === "fulfilled" && presets.value)
         setPresets(presets.value);
       if (dsp.status === "fulfilled" && dsp.value) setDsp(dsp.value);
+      if (analysis.status === "fulfilled" && analysis.value)
+        setAnalysis(analysis.value);
     })();
 
     refreshDevices();
@@ -203,6 +247,8 @@ export function useEngine(): EngineController {
     pairing,
     presets,
     dsp,
+    analysis,
+    sessionSummary,
     warning,
     error,
     busy,
@@ -212,5 +258,7 @@ export function useEngine(): EngineController {
     applyPreset: applyPresetAction,
     setGlobalBypass: setGlobalBypassAction,
     setLinkBypass: setLinkBypassAction,
+    applySuggestion: applySuggestionAction,
+    refreshSessionSummary,
   };
 }

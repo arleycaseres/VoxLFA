@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isEngineEvent,
+  type AnalysisSample,
   type DeviceList,
   type DspState,
   type EngineEvent,
@@ -31,6 +32,8 @@ export interface RemoteEngine {
   devices: DeviceList | null;
   /** Último estado de la cadena DSP del escritorio. */
   dsp: DspState | null;
+  /** Última muestra de análisis vocal (métricas + sugerencias del escritorio). */
+  analysis: AnalysisSample | null;
   /** Conecta al escritorio en `host:port` usando el código de emparejamiento. */
   connect: (host: string, port: number, code: string) => void;
   /** Cierra la conexión de forma voluntaria. */
@@ -44,6 +47,7 @@ export function useRemoteEngine(): RemoteEngine {
   const [level, setLevel] = useState<LevelSample | null>(null);
   const [devices, setDevices] = useState<DeviceList | null>(null);
   const [dsp, setDsp] = useState<DspState | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisSample | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,6 +146,13 @@ export function useRemoteEngine(): RemoteEngine {
               links: event.links,
             });
             break;
+          case "analysis":
+            setAnalysis({
+              metrics: event.metrics,
+              suggestions: event.suggestions,
+              capturedAtMs: event.capturedAtMs,
+            });
+            break;
           case "warning":
             setError(event.message);
             break;
@@ -177,5 +188,5 @@ export function useRemoteEngine(): RemoteEngine {
     };
   }, [teardown]);
 
-  return { connState, error, status, level, devices, dsp, connect, disconnect };
+  return { connState, error, status, level, devices, dsp, analysis, connect, disconnect };
 }

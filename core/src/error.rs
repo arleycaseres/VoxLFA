@@ -18,6 +18,10 @@ pub enum Error {
     #[error("protocol serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    /// Error de la cadena de análisis vocal (Fase 2).
+    #[error("analysis error: {0}")]
+    Analysis(String),
+
     /// Error de I/O del sistema.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -27,5 +31,10 @@ impl Error {
     /// Construye un [`Error::Audio`] con un mensaje formateado.
     pub fn audio<S: Into<String>>(message: S) -> Self {
         Error::Audio(message.into())
+    }
+
+    /// Construye un [`Error::Analysis`] con un mensaje formateado.
+    pub fn analysis<S: Into<String>>(message: S) -> Self {
+        Error::Analysis(message.into())
     }
 }

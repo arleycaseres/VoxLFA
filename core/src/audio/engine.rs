@@ -18,7 +18,7 @@
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -26,11 +26,15 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use ringbuf::traits::*;
 use ringbuf::HeapRb;
 
+use crate::analysis::{
+    AnalysisHandle, AnalysisShared, BandSplitter, SessionTracker, SuggestionEngine, VoiceAnalyzer,
+    VoiceFrame,
+};
 use crate::dsp::DspHandle;
 use crate::dsp::{AudioProcessor, ChainProcessor, DspCommand, LevelMeter, ProcessingInfo};
 use crate::error::Error;
 use crate::protocol::{
-    AudioDeviceInfo, EngineEvent, EngineState, EngineStatus, LevelSample, PresetId,
+    AnalysisSample, AudioDeviceInfo, EngineEvent, EngineState, EngineStatus, LevelSample, PresetId,
 };
 use crate::Result;
 
@@ -43,6 +47,22 @@ const RING_CAPACITY_SECS: u32 = 2;
 /// Intervalo mínimo entre muestras de nivel emitidas a la UI (evita saturar
 /// el canal y el frontend con decenas de miles de eventos por segundo).
 const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Intervalo entre marcos de análisis extraídos en el callback de audio.
+///
+/// Cada marco agrupa `ANALYSIS_FRAME_INTERVAL` ms de señal acumulada por el
+/// [`BandSplitter`] y se envía al hilo de análisis por un canal acotado.
+const ANALYSIS_FRAME_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Ventana deslizante de la voz (ms) usada para calcular las métricas.
+const ANALYSIS_WINDOW_MS: u32 = 2000;
+
+/// Intervalo mínimo entre eventos `EngineEvent::Analysis` emitidos a la UI
+/// (las métricas cambian lento; 2 eventos/s es suficiente y barato).
+const ANALYSIS_EMIT_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Capacidad del canal callback → hilo de análisis (marcos).
+const ANALYSIS_CHANNEL_CAPACITY: usize = 64;
 
 /// Latencia reportada antes de que haya señal circulando.
 const LATENCY_UNKNOWN: f32 = 0.0;
@@ -146,16 +166,19 @@ impl AudioEngine {
 
     /// Arranca el pipeline de audio con la configuración indicada.
     ///
-    /// Los eventos del motor (niveles, estado, DSP, avisos) se envían por el
-    /// canal `tx`. El pipeline corre en un hilo dedicado; usa [`EngineHandle`]
-    /// para detenerlo y [`DspHandle`] para reconfigurar la cadena en vivo.
+    /// Los eventos del motor (niveles, estado, DSP, análisis, avisos) se envían
+    /// por el canal `tx`. El pipeline corre en un hilo dedicado; usa
+    /// [`EngineHandle`] para detenerlo, [`DspHandle`] para reconfigurar la
+    /// cadena en vivo y [`AnalysisHandle`] para consultar el análisis vocal.
     ///
-    /// Devuelve `(EngineHandle, DspHandle)`: el primero controla el ciclo de
-    /// vida; el segundo, la cadena DSP (presets y bypass).
+    /// Devuelve `(EngineHandle, DspHandle, AnalysisHandle)`: el primero
+    /// controla el ciclo de vida; el segundo, la cadena DSP (presets y bypass);
+    /// el tercero, el análisis vocal (últimas métricas, resumen de sesión y
+    /// aplicación de sugerencias).
     pub fn start(
         config: AudioEngineConfig,
         tx: mpsc::Sender<EngineEvent>,
-    ) -> Result<(EngineHandle, DspHandle)> {
+    ) -> Result<(EngineHandle, DspHandle, AnalysisHandle)> {
         let host = cpal::default_host();
 
         // Resolver dispositivos: por nombre o los predeterminados del sistema.
@@ -202,6 +225,14 @@ impl AudioEngine {
             max_frames,
         );
 
+        // --- Análisis vocal ---------------------------------------------------
+        // El callback acumula bandas (sin asignación) y envía un marco por
+        // `ANALYSIS_FRAME_INTERVAL` a este canal; el hilo de análisis calcula
+        // métricas, sugerencias y el resumen de sesión y los expone a la UI.
+        let analysis_shared = Arc::new(Mutex::new(AnalysisShared::default()));
+        let (analysis_tx, analysis_rx) =
+            mpsc::sync_channel::<VoiceFrame>(ANALYSIS_CHANNEL_CAPACITY);
+
         // --- Stream de entrada (captura) -------------------------------------
         let mut level_meter = LevelMeter::new();
         let mut output_meter = LevelMeter::new();
@@ -215,6 +246,11 @@ impl AudioEngine {
         let tx_capture_errors = tx.clone();
         let stop_capture = stop.clone();
         let last_latency_in = last_latency.clone();
+
+        // Análisis vocal: divisor de bandas del callback + canal hacia el hilo.
+        let mut splitter = BandSplitter::new(sample_rate);
+        let mut last_frame_emit = Instant::now();
+        let analysis_frame_tx = analysis_tx.clone();
 
         let input_stream = input
             .build_input_stream::<f32, _, _>(
@@ -262,7 +298,16 @@ impl AudioEngine {
                         });
                     }
 
-                    // 3) Medir nivel de entrada y de salida (pre/post) y emitir
+                    // 3) Análisis vocal: acumular bandas del audio crudo y
+                    //    extraer un marco cada intervalo (sin asignar memoria).
+                    splitter.process(samples);
+                    if last_frame_emit.elapsed() >= ANALYSIS_FRAME_INTERVAL {
+                        last_frame_emit = Instant::now();
+                        let frame = splitter.frame();
+                        let _ = analysis_frame_tx.try_send(frame);
+                    }
+
+                    // 4) Medir nivel de entrada y de salida (pre/post) y emitir
                     //    evento, acotado por tiempo.
                     let input_levels = level_meter.process(samples);
                     let output_levels = output_meter.process(&scratch);
@@ -329,6 +374,61 @@ impl AudioEngine {
             )
             .map_err(|e| Error::audio(format!("build output stream: {e}")))?;
 
+        // --- Hilo de análisis vocal --------------------------------------------
+        // Consume los marcos del callback, desliza la ventana de métricas,
+        // evalúa sugerencias y mantiene el resumen de sesión. Aquí (no en el
+        // callback) es donde sí se construyen Strings y se envían eventos.
+        // El hilo se autofinaliza con el flag `stop`; no se une explícitamente.
+        let _analysis_thread = {
+            let stop_analysis = stop.clone();
+            let tx_analysis = tx.clone();
+            let shared = analysis_shared.clone();
+            thread::Builder::new()
+                .name("voxlfa-analysis".to_string())
+                .spawn(move || {
+                    let frame_interval_ms = ANALYSIS_FRAME_INTERVAL.as_millis() as u32;
+                    let mut analyzer = VoiceAnalyzer::new(ANALYSIS_WINDOW_MS, frame_interval_ms);
+                    let mut session = SessionTracker::new(now_ms(), frame_interval_ms);
+                    let suggestions = SuggestionEngine;
+                    let mut last_emit = Instant::now();
+
+                    loop {
+                        match analysis_rx.recv_timeout(Duration::from_millis(100)) {
+                            Ok(frame) => {
+                                session.update(&frame);
+                                analyzer.push(frame);
+                                if let Some(metrics) = analyzer.metrics() {
+                                    let suggestions = suggestions.evaluate(&metrics);
+                                    session.add_suggestions(suggestions.len() as u32);
+                                    let sample = AnalysisSample {
+                                        metrics,
+                                        suggestions,
+                                        captured_at_ms: now_ms(),
+                                    };
+                                    if let Ok(mut guard) = shared.lock() {
+                                        guard.last_sample = Some(sample.clone());
+                                        guard.session = Some(session.summary());
+                                    }
+                                    if last_emit.elapsed() >= ANALYSIS_EMIT_INTERVAL {
+                                        last_emit = Instant::now();
+                                        let _ = tx_analysis.send(EngineEvent::Analysis(sample));
+                                    }
+                                }
+                            }
+                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                            Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        }
+                        if stop_analysis.load(Ordering::Relaxed) {
+                            break;
+                        }
+                    }
+                    // Resumen final de la sesión (visible tras detener el motor).
+                    if let Ok(mut guard) = shared.lock() {
+                        guard.session = Some(session.summary());
+                    }
+                })?
+        };
+
         // --- Hilo del motor: mantiene vivos los streams y gestiona el ciclo ---
         let tx_thread = tx.clone();
         let stop_thread = stop.clone();
@@ -366,12 +466,15 @@ impl AudioEngine {
                 ));
             })?;
 
+        let analysis_handle = AnalysisHandle::new(analysis_shared, dsp_handle.clone());
+
         Ok((
             EngineHandle {
                 stop,
                 thread: Some(thread),
             },
             dsp_handle,
+            analysis_handle,
         ))
     }
 }

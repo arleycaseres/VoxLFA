@@ -9,7 +9,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::broadcast;
 use voxlfa_core::audio::AudioEngineConfig;
-use voxlfa_core::protocol::{AudioDeviceInfo, DspState, EngineEvent, EngineStatus, PresetInfo};
+use voxlfa_core::protocol::{
+    AnalysisSample, AudioDeviceInfo, DspState, EngineEvent, EngineStatus, PresetInfo,
+    SessionSummary,
+};
 
 use crate::engine::EngineManager;
 use crate::pairing::generate_pairing_code;
@@ -142,6 +145,40 @@ fn get_dsp_state(state: State<AppState>) -> Result<Option<DspState>, String> {
     Ok(engine.last_dsp_state())
 }
 
+/// Última muestra de análisis vocal (o `null` si el motor no arrancó).
+#[tauri::command]
+fn get_analysis(state: State<AppState>) -> Result<Option<AnalysisSample>, String> {
+    let engine = state.engine.lock().map_err(|err| err.to_string())?;
+    let analysis = engine
+        .analysis_handle()
+        .ok_or_else(|| "el motor no está corriendo".to_string())?;
+    analysis.get_analysis().map_err(|err| err.to_string())
+}
+
+/// Resumen acumulado de la sesión actual (o `null` si no hubo sesión).
+#[tauri::command]
+fn get_session_summary(state: State<AppState>) -> Result<Option<SessionSummary>, String> {
+    let engine = state.engine.lock().map_err(|err| err.to_string())?;
+    let analysis = engine
+        .analysis_handle()
+        .ok_or_else(|| "el motor no está corriendo".to_string())?;
+    analysis
+        .get_session_summary()
+        .map_err(|err| err.to_string())
+}
+
+/// Aplica la acción de una sugerencia (con confirmación del usuario).
+#[tauri::command]
+fn apply_suggestion(state: State<AppState>, suggestion_id: u8) -> Result<(), String> {
+    let engine = state.engine.lock().map_err(|err| err.to_string())?;
+    let analysis = engine
+        .analysis_handle()
+        .ok_or_else(|| "el motor no está corriendo".to_string())?;
+    analysis
+        .apply_suggestion(suggestion_id)
+        .map_err(|err| err.to_string())
+}
+
 /// Aplica un preset a la cadena DSP en vivo.
 #[tauri::command]
 fn apply_preset(state: State<AppState>, preset: PresetId) -> Result<(), String> {
@@ -199,6 +236,9 @@ pub fn run() {
             apply_preset,
             set_global_bypass,
             set_link_bypass,
+            get_analysis,
+            get_session_summary,
+            apply_suggestion,
             get_pairing_info,
         ])
         .setup(|app| {

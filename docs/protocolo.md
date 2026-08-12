@@ -80,6 +80,46 @@ mensajes JSON por el WebSocket para el móvil.
 - `latencyMs` (ver evento `status`) ya **incluye** la latencia propia de la
   cadena (p. ej. el limiter suma su lookahead).
 
+### `analysis` — muestra de análisis vocal (máx. cada ~500 ms)
+
+```json
+{
+  "type": "analysis",
+  "metrics": {
+    "rmsDb": -18.3,
+    "peakDb": -11.2,
+    "dynamicRangeDb": 12.4,
+    "crestDb": 7.1,
+    "brightness": 0.46,
+    "resonanceScore": 0.38,
+    "fatigueScore": 0.22,
+    "windowMs": 2000
+  },
+  "suggestions": [
+    {
+      "id": 0,
+      "kind": "resonance",
+      "severity": 0.64,
+      "message": "Se acumula energía en la zona baja-media (boominess). …",
+      "action": { "type": "applyPreset", "preset": "vozLimpia" }
+    }
+  ],
+  "capturedAtMs": 1723400001234
+}
+```
+
+- `metrics` se calcula sobre una **ventana deslizante** de `windowMs` ms usando
+  bandas de biquads (sin FFT): `brightness`, `resonanceScore` y `fatigueScore`
+  son índices 0–1; los niveles van en dBFS.
+- `suggestions`: reglas heurísticas disparadas (la UI muestra el mensaje en
+  español y ofrece "Aplicar" cuando `action.type` es `applyPreset`). El `id` es
+  estable por regla y lo usa el comando `apply_suggestion`.
+- `kind`: `"timbre" | "dynamics" | "fatigue" | "resonance"`.
+- `action`: `{ "type": "none" }` o `{ "type": "applyPreset", "preset": … }`.
+
+El resumen de la sesión no viaja por evento: se consulta con el comando
+`get_session_summary`.
+
 ### `devices` — listado de dispositivos
 
 ```json
@@ -139,6 +179,9 @@ La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
 | `apply_preset` | `{ preset: PresetId }` | `DspState` |
 | `set_global_bypass` | `{ bypass: boolean }` | `DspState` |
 | `set_link_bypass` | `{ name: string, bypass: boolean }` | `DspState` |
+| `get_analysis` | — | `AnalysisSample \| null` |
+| `get_session_summary` | — | `SessionSummary \| null` |
+| `apply_suggestion` | `{ suggestionId: number }` | — |
 | `get_pairing_info` | — | `{ code, port, lanAddress }` |
 
 - `bufferSize` en `start_engine` es opcional (`null` → heurística automática).
@@ -150,6 +193,12 @@ La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
   `DspState` y además emiten el evento `dsp`.
 - Estos tres comandos exigen el motor **en marcha**; si está detenido devuelven
   error (`EngineNotRunning`). `get_dsp_state` no exige motor en marcha.
+- `get_analysis` devuelve la última muestra de análisis (incluida la de la
+  última sesión) y `get_session_summary` el resumen acumulado de la sesión
+  actual; ambos devuelven `null` si el motor nunca arrancó.
+- `apply_suggestion` busca la sugerencia por `id` en la última muestra y, si su
+  acción es aplicar un preset, reconfigura la cadena en vivo (equivale a
+  `apply_preset` con confirmación).
 
 Los argumentos en JS usan camelCase (Tauri v2 los convierte desde snake_case).
 

@@ -52,6 +52,8 @@ pub enum EngineEvent {
     },
     /// Estado de la cadena DSP (preset activo, módulos y bypass).
     Dsp(super::dsp::DspState),
+    /// Análisis vocal en tiempo real (métricas + sugerencias de IA).
+    Analysis(super::analysis::AnalysisSample),
     /// Aviso no fatal (underrun de salida, etc.). El motor sigue corriendo.
     Warning {
         /// Descripción legible del aviso (en inglés, para logs).

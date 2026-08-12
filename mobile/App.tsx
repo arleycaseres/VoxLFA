@@ -40,7 +40,12 @@ export default function App() {
 
           {connected ? (
             <>
-              <MonitorView status={remote.status} level={remote.level} dsp={remote.dsp} />
+              <MonitorView
+                status={remote.status}
+                level={remote.level}
+                dsp={remote.dsp}
+                analysis={remote.analysis}
+              />
               <ConnectionForm
                 connState={remote.connState}
                 onConnect={remote.connect}

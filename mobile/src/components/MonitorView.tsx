@@ -5,7 +5,13 @@
 // teléfono: dial simplificado con barra de nivel y lecturas monoespaciadas.
 
 import { StyleSheet, Text, View } from "react-native";
-import type { DspState, EngineStatus, LevelSample } from "../lib/protocol";
+import type {
+  AnalysisSample,
+  DspState,
+  EngineStatus,
+  LevelSample,
+  Suggestion,
+} from "../lib/protocol";
 
 /** Nivel que corresponde al 100% de la barra (dBFS). */
 const DB_FULL = 0;
@@ -38,10 +44,19 @@ const PRESET_TEXT: Record<string, string> = {
   warm: "Warm",
 };
 
+/** Etiqueta en español del área de la voz de una sugerencia. */
+const KIND_TEXT: Record<Suggestion["kind"], string> = {
+  timbre: "Timbre",
+  dynamics: "Dinámica",
+  fatigue: "Fatiga",
+  resonance: "Resonancia",
+};
+
 interface MonitorViewProps {
   status: EngineStatus | null;
   level: LevelSample | null;
   dsp: DspState | null;
+  analysis: AnalysisSample | null;
 }
 
 /** Barra de nivel vertical (cian, naranja al acercarse a 0 dBFS). */
@@ -68,7 +83,7 @@ function LevelBar({ label, valueDb, peakDb }: { label: string; valueDb: number; 
   );
 }
 
-export function MonitorView({ status, level, dsp }: MonitorViewProps) {
+export function MonitorView({ status, level, dsp, analysis }: MonitorViewProps) {
   const state = status?.state ?? "stopped";
   const running = state === "running";
 
@@ -130,6 +145,62 @@ export function MonitorView({ status, level, dsp }: MonitorViewProps) {
         <InfoRow label="Entrada" value={status?.inputDevice ?? "—"} />
         <InfoRow label="Salida" value={status?.outputDevice ?? "—"} />
       </View>
+
+      {/* Asistente vocal (solo lectura: el control es del escritorio) */}
+      <View style={styles.infoCard}>
+        <Text style={styles.cardTitle}>ASISTENTE</Text>
+        {!analysis ? (
+          <Text style={styles.emptyText}>
+            {running
+              ? "Analizando la voz… (se necesitan ~2 s de señal)."
+              : "Sin análisis todavía."}
+          </Text>
+        ) : (
+          <>
+            <View style={styles.metricGrid}>
+              <Metric label="Brillo" value={`${Math.round(analysis.metrics.brightness * 100)}%`} />
+              <Metric
+                label="Resonancia"
+                value={`${Math.round(analysis.metrics.resonanceScore * 100)}%`}
+              />
+              <Metric
+                label="Fatiga"
+                value={`${Math.round(analysis.metrics.fatigueScore * 100)}%`}
+              />
+              <Metric
+                label="Dinámica"
+                value={`${analysis.metrics.dynamicRangeDb.toFixed(1)} dB`}
+              />
+            </View>
+            {analysis.suggestions.length === 0 ? (
+              <Text style={styles.emptyText}>Voz equilibrada: sin sugerencias.</Text>
+            ) : (
+              analysis.suggestions.map((suggestion) => (
+                <View key={suggestion.id} style={styles.suggestionRow}>
+                  <View style={styles.suggestionHead}>
+                    <Text style={styles.suggestionKind}>
+                      {KIND_TEXT[suggestion.kind] ?? suggestion.kind}
+                    </Text>
+                    <Text style={styles.suggestionSev}>
+                      {Math.round(suggestion.severity * 100)}%
+                    </Text>
+                  </View>
+                  <Text style={styles.suggestionMessage}>{suggestion.message}</Text>
+                </View>
+              ))
+            )}
+          </>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.metricCell}>
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
     </View>
   );
 }
@@ -292,5 +363,74 @@ const styles = StyleSheet.create({
     fontFamily: "monospace",
     flexShrink: 1,
     textAlign: "right",
+  },
+  cardTitle: {
+    color: "#8a929c",
+    fontSize: 10,
+    letterSpacing: 2,
+    fontFamily: "monospace",
+  },
+  emptyText: {
+    color: "#8a929c",
+    fontSize: 12,
+    fontStyle: "italic",
+  },
+  metricGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  metricCell: {
+    flexGrow: 1,
+    flexBasis: "40%",
+    backgroundColor: "#0c0e10",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#2a2e34",
+    padding: 8,
+    gap: 2,
+  },
+  metricValue: {
+    color: "#4fd8ff",
+    fontSize: 14,
+    fontFamily: "monospace",
+    fontWeight: "700",
+  },
+  metricLabel: {
+    color: "#8a929c",
+    fontSize: 9,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  suggestionRow: {
+    backgroundColor: "#0c0e10",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderLeftWidth: 3,
+    borderColor: "#2a2e34",
+    borderLeftColor: "#ff4a1f",
+    padding: 10,
+    gap: 4,
+  },
+  suggestionHead: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  suggestionKind: {
+    color: "#e6e9ec",
+    fontSize: 11,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  suggestionSev: {
+    color: "#8a929c",
+    fontSize: 10,
+    fontFamily: "monospace",
+  },
+  suggestionMessage: {
+    color: "#8a929c",
+    fontSize: 12,
+    lineHeight: 17,
   },
 });

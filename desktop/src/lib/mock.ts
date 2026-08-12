@@ -6,6 +6,7 @@
 // `tauri.ts` lo activa solo si `window.__TAURI_INTERNALS__` no está presente.
 
 import type {
+  AnalysisSample,
   DeviceList,
   DspLinkState,
   DspState,
@@ -15,6 +16,9 @@ import type {
   LevelSample,
   PresetId,
   PresetInfo,
+  SessionSummary,
+  Suggestion,
+  VoiceMetrics,
 } from "./types";
 import type { PairingInfo } from "./tauri";
 
@@ -74,6 +78,23 @@ const PRESET_LINKS: Record<PresetId, string[]> = {
 /** Cada cuánto se emite una muestra de nivel (ms), igual que el core. */
 const LEVEL_EMIT_INTERVAL_MS = 50;
 
+/** Cada cuánto se emite una muestra de análisis (ms), igual que el core. */
+const ANALYSIS_EMIT_INTERVAL_MS = 500;
+
+/** Acumulador de la sesión de análisis simulada. */
+interface SessionAccumulator {
+  startedAtMs: number;
+  frames: number;
+  sumRms: number;
+  minRms: number;
+  maxRms: number;
+  peak: number;
+  sumBrightness: number;
+  fatigueAcc: number;
+  loudFrames: number;
+  suggestionsCount: number;
+}
+
 /**
  * Heurística de buffer por dispositivo (espejo de la del core): USB → 128,
  * Bluetooth/HDMI → 1024, resto → 256.
@@ -101,6 +122,31 @@ let phase = 0;
 let lastLevel: LevelSample | null = null;
 let lastStatus: EngineStatus | null = null;
 let dspState: DspState = buildDspState("dry");
+
+let hasRun = false;
+let lastAnalysis: AnalysisSample | null = null;
+let analysisPhase = 0;
+let analysisTicker: ReturnType<typeof setInterval> | null = null;
+let session: SessionAccumulator = newSession();
+
+function newSession(): SessionAccumulator {
+  return {
+    startedAtMs: Date.now(),
+    frames: 0,
+    sumRms: 0,
+    minRms: Number.POSITIVE_INFINITY,
+    maxRms: Number.NEGATIVE_INFINITY,
+    peak: Number.NEGATIVE_INFINITY,
+    sumBrightness: 0,
+    fatigueAcc: 0,
+    loudFrames: 0,
+    suggestionsCount: 0,
+  };
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
 
 function buildDspState(preset: PresetId): DspState {
   const links: DspLinkState[] = PRESET_LINKS[preset].map((name) => ({
@@ -174,6 +220,159 @@ function stopTicker() {
   }
 }
 
+/** Acota un valor y lo devuelve. */
+function suggest(
+  id: number,
+  kind: Suggestion["kind"],
+  severity: number,
+  message: string,
+  action: Suggestion["action"],
+): Suggestion {
+  return { id, kind, severity: clamp01(severity), message, action };
+}
+
+/**
+ * Genera métricas de voz simuladas y sus sugerencias (espejo de las reglas
+ * del core: `suggest.rs`).
+ */
+function nextAnalysis(capturedAtMs: number): AnalysisSample {
+  analysisPhase += 0.22;
+  const loudness = clamp01((lastLevel?.inputRmsDb ?? -60) / 20 + 2);
+  const brightness = clamp01(0.42 + Math.sin(analysisPhase * 0.7) * 0.28);
+  const resonance = clamp01(0.3 + Math.cos(analysisPhase * 0.4) * 0.22);
+  const dynamicRangeDb = 8 + 6 * Math.sin(analysisPhase * 0.3);
+  const fatigue = clamp01(0.5 * loudness + 0.5 * brightness * loudness);
+  const rmsDb = lastLevel?.inputRmsDb ?? -60;
+  const peakDb = lastLevel?.inputPeakDb ?? -120;
+
+  const metrics: VoiceMetrics = {
+    rmsDb,
+    peakDb,
+    dynamicRangeDb: Math.max(0, dynamicRangeDb),
+    crestDb: Math.max(0, peakDb - rmsDb),
+    brightness,
+    resonanceScore: resonance,
+    fatigueScore: fatigue,
+    windowMs: 2000,
+  };
+
+  const suggestions: Suggestion[] = [];
+  if (resonance > 0.45) {
+    suggestions.push(
+      suggest(
+        0,
+        "resonance",
+        (resonance - 0.45) / 0.25,
+        "Se acumula energía en la zona baja-media (boominess). Aplica el preset 'Voz limpia' para reducir la banda de ~300 Hz.",
+        { type: "applyPreset", preset: "vozLimpia" },
+      ),
+    );
+  }
+  if (brightness < 0.28) {
+    suggestions.push(
+      suggest(
+        1,
+        "timbre",
+        (0.28 - brightness) / 0.12,
+        "Timbre opaco: falta presencia en los agudos. Prueba el preset 'Voz limpia' para realzar la claridad.",
+        { type: "applyPreset", preset: "vozLimpia" },
+      ),
+    );
+  }
+  if (brightness > 0.72) {
+    suggestions.push(
+      suggest(
+        2,
+        "timbre",
+        (brightness - 0.72) / 0.15,
+        "Timbre brillante/estridente. Suaviza los agudos con el preset 'Warm' para un tono más cálido.",
+        { type: "applyPreset", preset: "warm" },
+      ),
+    );
+  }
+  if (dynamicRangeDb > 0 && dynamicRangeDb < 6) {
+    suggestions.push(
+      suggest(
+        3,
+        "dynamics",
+        (6 - dynamicRangeDb) / 4,
+        "La dinámica está muy comprimida. 'Warm' usa una compresión más ligera y deja respirar la voz.",
+        { type: "applyPreset", preset: "warm" },
+      ),
+    );
+  }
+  if (dynamicRangeDb > 18) {
+    suggestions.push(
+      suggest(
+        4,
+        "dynamics",
+        (dynamicRangeDb - 18) / 6,
+        "Hay mucha variación de volumen. El preset 'Voz limpia' ayuda a controlar los picos sin sonar procesado.",
+        { type: "applyPreset", preset: "vozLimpia" },
+      ),
+    );
+  }
+  if (fatigue > 0.55) {
+    suggestions.push(
+      suggest(
+        5,
+        "fatigue",
+        (fatigue - 0.55) / 0.3,
+        "Nivel alto sostenido: la voz muestra signos de fatiga. Considera pausas o reducir la ganancia de entrada.",
+        { type: "none" },
+      ),
+    );
+  }
+
+  return { metrics, suggestions, capturedAtMs };
+}
+
+function updateSession(sample: AnalysisSample) {
+  session.frames += 1;
+  session.sumRms += sample.metrics.rmsDb;
+  session.minRms = Math.min(session.minRms, sample.metrics.rmsDb);
+  session.maxRms = Math.max(session.maxRms, sample.metrics.rmsDb);
+  session.peak = Math.max(session.peak, sample.metrics.peakDb);
+  session.sumBrightness += sample.metrics.brightness;
+  session.fatigueAcc += sample.metrics.fatigueScore;
+  if (sample.metrics.rmsDb > -20) session.loudFrames += 1;
+  session.suggestionsCount += sample.suggestions.length;
+}
+
+function buildSessionSummary(): SessionSummary {
+  const frames = Math.max(1, session.frames);
+  return {
+    startedAtMs: session.startedAtMs,
+    durationMs: session.frames * ANALYSIS_EMIT_INTERVAL_MS,
+    avgRmsDb: session.sumRms / frames,
+    peakDb: session.peak,
+    dynamicRangeDb: Math.max(0, session.maxRms - session.minRms),
+    avgBrightness: session.sumBrightness / frames,
+    fatigueScore: clamp01(session.fatigueAcc / frames),
+    loudTimeMs: session.loudFrames * ANALYSIS_EMIT_INTERVAL_MS,
+    suggestionsCount: session.suggestionsCount,
+  };
+}
+
+function startAnalysisTicker() {
+  stopAnalysisTicker();
+  analysisPhase = 0;
+  session = newSession();
+  analysisTicker = setInterval(() => {
+    const sample = nextAnalysis(Date.now());
+    lastAnalysis = sample;
+    updateSession(sample);
+    emit({ type: "analysis", ...sample });
+  }, ANALYSIS_EMIT_INTERVAL_MS);
+}
+
+function stopAnalysisTicker() {
+  if (analysisTicker !== null) {
+    clearInterval(analysisTicker);
+    analysisTicker = null;
+  }
+}
+
 export function listDevices(): Promise<DeviceList> {
   return Promise.resolve(FAKE_DEVICES);
 }
@@ -185,9 +384,11 @@ export function startEngine(requested?: number | null): Promise<void> {
     syncStatus();
     setTimeout(() => {
       state = "running";
+      hasRun = true;
       syncStatus();
       syncDsp();
       startTicker();
+      startAnalysisTicker();
       resolve();
     }, 650);
   });
@@ -196,6 +397,7 @@ export function startEngine(requested?: number | null): Promise<void> {
 export function stopEngine(): Promise<void> {
   return new Promise((resolve) => {
     stopTicker();
+    stopAnalysisTicker();
     state = "stopping";
     syncStatus();
     setTimeout(() => {
@@ -242,6 +444,24 @@ export function setLinkBypass(link: string, bypass: boolean): Promise<void> {
     ),
   };
   syncDsp();
+  return Promise.resolve();
+}
+
+export function getAnalysis(): Promise<AnalysisSample | null> {
+  return Promise.resolve(hasRun ? lastAnalysis : null);
+}
+
+export function getSessionSummary(): Promise<SessionSummary | null> {
+  return Promise.resolve(hasRun ? buildSessionSummary() : null);
+}
+
+export function applySuggestion(suggestionId: number): Promise<void> {
+  const suggestion = lastAnalysis?.suggestions.find(
+    (item) => item.id === suggestionId,
+  );
+  if (suggestion?.action.type === "applyPreset") {
+    applyPreset(suggestion.action.preset);
+  }
   return Promise.resolve();
 }
 

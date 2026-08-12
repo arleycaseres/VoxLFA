@@ -5,7 +5,9 @@ base (motor de audio de baja latencia, cabina de escritorio y monitor móvil
 remoto); la **Fase 1** añade el DSP real: una cadena encadenable de módulos
 vocal (EQ, compresor, de-esser, saturación, delay, reverb, limiter, pasa-altos,
 ganancia) con presets aplicables en vivo, bypass por módulo y global, y niveles
-de salida pre/post.
+de salida pre/post. La **Fase 2** añade el asistente vocal local: análisis de la
+voz en vivo (sin FFT ni nube), sugerencias accionables con confirmación y
+resumen de sesión exportable.
 
 ## Principios
 
@@ -67,12 +69,29 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
   supresión de *boominess*).
 - `protocol`: contratos serde de eventos y comandos (ver `docs/protocolo.md`),
   incluida la especificación DSP (`protocol/dsp.rs`) que es la única fuente de
-  configuración JSON.
+  configuración JSON, y el análisis vocal (`protocol/analysis.rs`).
+- `analysis`: asistente vocal local (Fase 2):
+  - `bands::BandSplitter` divide la señal en bandas con **biquads fijos**
+    (graves <200 Hz, baja-media ~300 Hz, media ~1.2 kHz, agudos >4 kHz) y
+    acumula energías, picos y cruces por cero. Corre en el callback de audio:
+    **O(n) y sin asignación**; cada `ANALYSIS_FRAME_INTERVAL` (200 ms) extrae
+    un `VoiceFrame`.
+  - `analyzer::VoiceAnalyzer` desliza una ventana de marcos (2 s) y deriva
+    métricas: RMS, rango dinámico, factor de cresta, brillo, resonancia y
+    fatiga vocal (heurística de esfuerzo sostenido). `SessionTracker` acumula
+    las mismas métricas para el resumen de la sesión.
+  - `suggest::SuggestionEngine` evalúa reglas heurísticas sobre las métricas y
+    produce `Suggestion` con severidad 0–1, mensaje en español y una acción
+    confirmable (aplicar un preset o informativa).
+  - `handle::AnalysisHandle` expone a la UI la última muestra, el resumen de
+    sesión y `apply_suggestion` (delega en `DspHandle` para reconfigurar en
+    vivo). El estado compartido (`AnalysisShared`) lo escribe el hilo de
+    análisis.
 
 Los callbacks de `cpal` **no asignan memoria ni bloquean mutex**: solo
 intercambian el puntero de la cadena activa, procesan el bloque en *scratch*
-preasignados y acumulan muestras de nivel que se drenan por canal a un hilo
-dedicado.
+preasignados, acumulan muestras de nivel y de bandas, y drenan por canal a
+hilos dedicados.
 
 ### `desktop/` — voxlfa-desktop (Tauri v2)
 
@@ -88,7 +107,8 @@ Cáscara de escritorio que orquesta el core:
   ambiguos (`0/O`, `1/I/l`).
 - `src-tauri/src/tauri_app.rs` (feature `webview`): comandos expuestos a la UI,
   incluidos `apply_preset`, `set_global_bypass` y `set_link_bypass`, que
-  reconfiguran la cadena DSP en vivo vía `EngineManager`.
+  reconfiguran la cadena DSP en vivo vía `EngineManager`, y los de análisis:
+  `get_analysis`, `get_session_summary` y `apply_suggestion`.
 
 La UI (React/TS) accede a Tauri **solo** a través de `src/lib/tauri.ts`; el
 estado se consume con el hook `useEngine` (que también replica la cabina con un
@@ -107,16 +127,21 @@ exponencial.
 
 1. `cpal` invoca los callbacks con bloques de audio.
 2. El core procesa el bloque con la cadena DSP activa (puntero conmutado por
-   `DspHandle`, sin bloqueos), copia las muestras al ring buffer y publica
-   métricas de nivel de entrada **y** salida.
+   `DspHandle`, sin bloqueos), copia las muestras al ring buffer, acumula
+   energías de banda en el `BandSplitter` y publica métricas de nivel de
+   entrada **y** salida.
 3. Un hilo dedicado en el core drena métricas y emite `EngineEvent` por canal
-   `mpsc` (niveles cada 50 ms; el estado en cada transición).
-4. Cuando el estado DSP cambia (preset o bypass), el motor emite `EngineEvent::Dsp`
+   `mpsc` (niveles cada 50 ms; el estado en cada transición). Cada 200 ms el
+   `BandSplitter` extrae un `VoiceFrame` a otro hilo dedicado de análisis.
+4. El hilo de análisis desliza la ventana, evalúa sugerencias, mantiene el
+   resumen de sesión (consultable vía `AnalysisHandle`) y emite
+   `EngineEvent::Analysis` (máx. cada ~500 ms).
+5. Cuando el estado DSP cambia (preset o bypass), el motor emite `EngineEvent::Dsp`
    con la nueva cadena; el escritorio lo difunde igual que el resto.
-5. `EngineManager` (forwarder) actualiza el estado compartido y reenvía:
+6. `EngineManager` (forwarder) actualiza el estado compartido y reenvía:
    - a la UI como evento Tauri `engine-event`;
    - al WebSocket como JSON serializado.
-6. El móvil valida el JSON con su guard de tipos y actualiza la vista.
+7. El móvil valida el JSON con su guard de tipos y actualiza la vista.
 
 ## Reconfiguración DSP en vivo
 
@@ -150,15 +175,18 @@ es mínimo (la métrica real se lee en cada bloque).
 | Ring buffer lock-free entre callbacks | Sin contención en el camino de audio |
 | Niveles con umbral y drenado por canal | Los callbacks nunca hacen trabajo lento |
 | Cadena conmutada por puntero (hilo de control) | Reconfiguración en vivo sin bloquear audio |
+| Análisis sin FFT (bandas con biquads) | O(n), sin dependencia extra y sin asignación en el callback |
+| Análisis en hilo dedicado + canal acotado | Las sugerencias y los `String` no tocan el camino de audio |
 | `DspCommand` sin `Debug` | Evita `unwrap`/`expect` y simplifica el patrón |
 | WebSocket con token en la URL | Autenticación simple y sin estado |
 | Tipos espejo en tres lenguajes | Contrato único y verificable |
 
-## Límites de la Fase 1
+## Límites de la Fase 2
 
-- La cadena DSP se configura con **presets y bypass** (los parámetros de cada
-  módulo son fijos por preset; el slider fino por banda de EQ queda para una
-  fase posterior).
-- El móvil solo monitorea; no controla la cadena (se planea en una fase posterior).
+- El análisis usa **reglas heurísticas** sobre bandas de biquads (sin FFT ni
+  modelo entrenado); los umbrales de `suggest.rs` se afinan con voz real.
+- La UI aplica **presets existentes** a partir de las sugerencias; la
+  generación de presets a medida queda para una fase posterior.
+- El móvil **solo monitorea** el análisis y las sugerencias (el bloque 5,
+  control desde el móvil con autenticación mutua, quedó fuera de la Fase 2).
 - Sin persistencia de configuración ni autodetección de la IP del escritorio.
-- La Fase 2 añadirá el asistente de IA (análisis vocal y ajuste automático).

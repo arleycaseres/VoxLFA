@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as mock from "./mock";
 import type {
+  AnalysisSample,
   DeviceList,
   DspState,
   EngineEvent,
@@ -15,6 +16,7 @@ import type {
   LevelSample,
   PresetId,
   PresetInfo,
+  SessionSummary,
 } from "./types";
 
 /** `true` dentro de la ventana real de Tauri; `false` en un navegador plano. */
@@ -112,6 +114,27 @@ export function setLinkBypass(link: string, bypass: boolean): Promise<void> {
   return inTauri()
     ? invoke<void>("set_link_bypass", { link, bypass })
     : mock.setLinkBypass(link, bypass);
+}
+
+/** Lee la última muestra de análisis vocal (o `null` si no hay datos). */
+export function getAnalysis(): Promise<AnalysisSample | null> {
+  return inTauri()
+    ? invoke<AnalysisSample | null>("get_analysis")
+    : mock.getAnalysis();
+}
+
+/** Lee el resumen acumulado de la sesión actual (o `null`). */
+export function getSessionSummary(): Promise<SessionSummary | null> {
+  return inTauri()
+    ? invoke<SessionSummary | null>("get_session_summary")
+    : mock.getSessionSummary();
+}
+
+/** Aplica la acción de una sugerencia (con confirmación del usuario). */
+export function applySuggestion(suggestionId: number): Promise<void> {
+  return inTauri()
+    ? invoke<void>("apply_suggestion", { suggestionId })
+    : mock.applySuggestion(suggestionId);
 }
 
 /**

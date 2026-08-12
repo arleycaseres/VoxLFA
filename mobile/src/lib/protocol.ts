@@ -61,6 +61,59 @@ export interface DeviceList {
   outputs: AudioDeviceInfo[];
 }
 
+/** Métricas de la voz sobre la ventana deslizante de análisis (dBFS). */
+export interface VoiceMetrics {
+  rmsDb: number;
+  peakDb: number;
+  dynamicRangeDb: number;
+  crestDb: number;
+  brightness: number;
+  resonanceScore: number;
+  fatigueScore: number;
+  windowMs: number;
+}
+
+/** Área de la voz que motiva una sugerencia. */
+export type SuggestionKind =
+  | "timbre"
+  | "dynamics"
+  | "fatigue"
+  | "resonance";
+
+/** Acción confirmable que acompaña a una sugerencia. */
+export type SuggestionAction =
+  | { type: "none" }
+  | { type: "applyPreset"; preset: PresetId };
+
+/** Sugerencia generada por el asistente para la voz actual. */
+export interface Suggestion {
+  id: number;
+  kind: SuggestionKind;
+  severity: number;
+  message: string;
+  action: SuggestionAction;
+}
+
+/** Muestra de análisis emitida por el motor (métricas + sugerencias). */
+export interface AnalysisSample {
+  metrics: VoiceMetrics;
+  suggestions: Suggestion[];
+  capturedAtMs: number;
+}
+
+/** Resumen acumulado de la sesión de voz en curso. */
+export interface SessionSummary {
+  startedAtMs: number;
+  durationMs: number;
+  avgRmsDb: number;
+  peakDb: number;
+  dynamicRangeDb: number;
+  avgBrightness: number;
+  fatigueScore: number;
+  loudTimeMs: number;
+  suggestionsCount: number;
+}
+
 /**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).
  */
@@ -69,6 +122,7 @@ export type EngineEvent =
   | (LevelSample & { type: "level" })
   | (DeviceList & { type: "devices" })
   | (DspState & { type: "dsp" })
+  | (AnalysisSample & { type: "analysis" })
   | { type: "warning"; message: string };
 
 /** Guard de tipos para mensajes recibidos del WebSocket. */
@@ -93,6 +147,13 @@ export function isEngineEvent(raw: unknown): raw is EngineEvent {
         typeof event.preset === "string" &&
         typeof event.globalBypass === "boolean" &&
         Array.isArray(event.links)
+      );
+    case "analysis":
+      return (
+        typeof event.capturedAtMs === "number" &&
+        typeof event.metrics === "object" &&
+        event.metrics !== null &&
+        Array.isArray(event.suggestions)
       );
     case "warning":
       return typeof event.message === "string";

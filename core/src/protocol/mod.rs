@@ -11,10 +11,14 @@
 //! **Regla del proyecto:** nunca cambies un nombre de campo sin actualizar los
 //! tres lados (Rust, TS desktop, TS móvil). Ver `docs/protocolo.md`.
 
+pub mod analysis;
 pub mod control;
 pub mod dsp;
 pub mod event;
 
+pub use analysis::{
+    AnalysisSample, SessionSummary, Suggestion, SuggestionAction, SuggestionKind, VoiceMetrics,
+};
 pub use control::ControlCommand;
 pub use dsp::{
     DspLinkState, DspModuleKind, DspModuleSpec, DspState, EqBand, EqBandKind, PresetId, PresetInfo,

@@ -24,7 +24,7 @@
 //! use voxlfa_core::protocol::EngineEvent;
 //!
 //! let (tx, rx) = mpsc::channel();
-//! let (handle, dsp) = AudioEngine::start(AudioEngineConfig::default(), tx)?;
+//! let (handle, dsp, _analysis) = AudioEngine::start(AudioEngineConfig::default(), tx)?;
 //!
 //! // Escuchar eventos del motor en este hilo...
 //! for event in rx {
@@ -51,6 +51,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod analysis;
 pub mod dsp;
 pub mod error;
 pub mod protocol;

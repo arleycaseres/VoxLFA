@@ -1,7 +1,7 @@
 // VoxLFA — interfaz "cabina" de monitoreo y control del motor en vivo.
 //
-// Fase 1: presets aplicables en vivo, cadena DSP con bypass y niveles pre/post.
-// El panel de sugerencias de IA queda reservado para la Fase 2.
+// Fase 2: asistente vocal local (análisis en vivo, sugerencias accionables con
+// confirmación y resumen de sesión exportable) sobre la cabina de la Fase 1.
 
 import { useState } from "react";
 import { useEngine } from "./hooks/useEngine";
@@ -13,6 +13,7 @@ import { StatusPill } from "./components/StatusPill";
 import { PairingBadge } from "./components/PairingBadge";
 import { PresetCard } from "./components/PresetCard";
 import { DspChain } from "./components/DspChain";
+import { SuggestionPanel } from "./components/SuggestionPanel";
 import { formatLatency, formatSampleRate } from "./lib/format";
 import "./styles/fonts.css";
 import "./styles/tokens.css";
@@ -183,12 +184,13 @@ export default function App() {
           </div>
 
           <h2 className="panel__title panel__title--spaced">Sugerencias de IA</h2>
-          <div className="ai-placeholder">
-            <span className="ai-placeholder__icon">✦</span>
-            <p className="ai-placeholder__text">
-              En la Fase 2 el asistente sugerirá presets según tu voz en tiempo real.
-            </p>
-          </div>
+          <SuggestionPanel
+            analysis={engine.analysis}
+            running={running}
+            sessionSummary={engine.sessionSummary}
+            onApplySuggestion={(id) => void engine.applySuggestion(id)}
+            onRefreshSummary={() => void engine.refreshSessionSummary()}
+          />
         </aside>
       </main>
 
@@ -204,7 +206,7 @@ export default function App() {
           Salida: <strong>{engine.status?.outputDevice ?? "—"}</strong>
         </span>
         <span className="app__footer-item app__footer-item--mono">
-          v0.1.0 · Fase 1
+          v0.2.0 · Fase 2
         </span>
       </footer>
     </div>

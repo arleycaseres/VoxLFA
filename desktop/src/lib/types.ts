@@ -89,14 +89,89 @@ export interface DeviceList {
   outputs: AudioDeviceInfo[];
 }
 
+/** Métricas de la voz sobre la ventana deslizante de análisis (dBFS). */
+export interface VoiceMetrics {
+  /** Nivel RMS medio de la ventana en dBFS. */
+  rmsDb: number;
+  /** Nivel pico de la ventana en dBFS. */
+  peakDb: number;
+  /** Rango dinámico de la ventana (dB). */
+  dynamicRangeDb: number;
+  /** Factor de cresta (dB entre pico y RMS). */
+  crestDb: number;
+  /** Brillo espectral (0–1): energía en agudos frente al total. */
+  brightness: number;
+  /** Resonancia baja-media (0–1): energía en la zona de boominess. */
+  resonanceScore: number;
+  /** Índice de fatiga vocal (0–1). */
+  fatigueScore: number;
+  /** Tamaño de la ventana de análisis en ms. */
+  windowMs: number;
+}
+
+/** Área de la voz que motiva una sugerencia. */
+export type SuggestionKind =
+  | "timbre"
+  | "dynamics"
+  | "fatigue"
+  | "resonance";
+
+/** Acción confirmable que acompaña a una sugerencia. */
+export type SuggestionAction =
+  | { type: "none" }
+  | { type: "applyPreset"; preset: PresetId };
+
+/** Sugerencia generada por el asistente para la voz actual. */
+export interface Suggestion {
+  /** Identificador estable de la regla (para `applySuggestion`). */
+  id: number;
+  kind: SuggestionKind;
+  /** Importancia (0–1). */
+  severity: number;
+  /** Mensaje legible en español. */
+  message: string;
+  action: SuggestionAction;
+}
+
+/** Muestra de análisis emitida por el motor (métricas + sugerencias). */
+export interface AnalysisSample {
+  metrics: VoiceMetrics;
+  suggestions: Suggestion[];
+  /** Tiempo monotónico (ms) de la captura. */
+  capturedAtMs: number;
+}
+
+/** Resumen acumulado de la sesión de voz en curso. */
+export interface SessionSummary {
+  /** Tiempo (ms epoch) en el que arrancó la sesión. */
+  startedAtMs: number;
+  /** Duración de la sesión hasta ahora (ms). */
+  durationMs: number;
+  /** Nivel RMS medio de toda la sesión (dBFS). */
+  avgRmsDb: number;
+  /** Pico máximo de la sesión (dBFS). */
+  peakDb: number;
+  /** Rango dinámico observado (dB). */
+  dynamicRangeDb: number;
+  /** Brillo medio de la sesión (0–1). */
+  avgBrightness: number;
+  /** Índice de fatiga acumulado (0–1). */
+  fatigueScore: number;
+  /** Tiempo con nivel alto (RMS > -20 dBFS) en ms. */
+  loudTimeMs: number;
+  /** Número de sugerencias emitidas durante la sesión. */
+  suggestionsCount: number;
+}
+
 /**
  * Evento emitido por el motor (tag `type`, campos en camelCase).
- * Los eventos `status`, `level` y `dsp` incluyen además todos los campos de su
- * respectiva estructura (serde los aplana).
+ * Los eventos `status`, `level`, `dsp` y `analysis` incluyen además todos los
+ * campos de su respectiva estructura (serde los aplana).
  */
 export type EngineEvent =
   | (EngineStatus & { type: "status" })
   | (LevelSample & { type: "level" })
   | (DeviceList & { type: "devices" })
   | (DspState & { type: "dsp" })
+  | (AnalysisSample & { type: "analysis" })
   | { type: "warning"; message: string };
