@@ -6,6 +6,7 @@
 //! de-esser, saturación, delay, reverb, limiter).
 
 pub mod biquad;
+pub mod boomsuppressor;
 pub mod chain;
 pub mod compressor;
 pub mod deesser;
@@ -15,6 +16,7 @@ pub mod gain;
 pub mod highpass;
 pub mod level;
 pub mod limiter;
+pub mod notch;
 pub mod passthrough;
 pub mod presets;
 pub mod processor;
@@ -22,6 +24,7 @@ pub mod reverb;
 pub mod saturator;
 
 pub use biquad::{BiquadFilter, BiquadKind, BiquadParams};
+pub use boomsuppressor::BoomSuppressor;
 pub use chain::{ChainProcessor, DspCommand, DspHandle};
 pub use compressor::Compressor;
 pub use deesser::DeEsser;
@@ -31,6 +34,7 @@ pub use gain::Gain;
 pub use highpass::HighPass;
 pub use level::{LevelMeter, Levels};
 pub use limiter::Limiter;
+pub use notch::Notch;
 pub use passthrough::PassThroughProcessor;
 pub use presets::PresetFactory;
 pub use processor::{AudioProcessor, ProcessResult, ProcessingInfo};

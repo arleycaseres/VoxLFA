@@ -77,6 +77,22 @@ pub enum DspModuleKind {
         /// Frecuencia de corte (Hz).
         cutoff_hz: f32,
     },
+    /// Filtro muesca (notch): mata una resonancia de feedback concreta.
+    Notch {
+        /// Frecuencia central de la muesca (Hz).
+        freq_hz: f32,
+        /// Factor de calidad (a mayor Q, muesca más estrecha).
+        q: f32,
+    },
+    /// Supresión dinámica de "boominess" (graves medios).
+    BoomSuppressor {
+        /// Umbral (dBFS) de activación.
+        threshold_db: f32,
+        /// Frecuencia central de la banda baja-media (Hz).
+        freq_hz: f32,
+        /// Cantidad de reducción (0 = ninguno, 1 = máximo).
+        amount: f32,
+    },
     /// Ecualizador paramétrico con varias bandas.
     Eq {
         /// Bandas activas, en orden de aplicación.

@@ -46,10 +46,16 @@ impl PresetFactory {
     }
 }
 
-/// Voz limpia: pasa-altos, EQ suave, de-esser, compresor transparente, limiter.
+/// Voz limpia: pasa-altos, antifeedback (boominess), EQ suave, de-esser,
+/// compresor transparente y limiter.
 fn voce_limpia() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 80.0 }),
+        module(DspModuleKind::BoomSuppressor {
+            threshold_db: -30.0,
+            freq_hz: 250.0,
+            amount: 0.5,
+        }),
         module(DspModuleKind::Eq {
             bands: vec![
                 band(EqBandKind::LowShelf, 200.0, -2.0, 0.8),
@@ -77,10 +83,15 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
     ]
 }
 
-/// Radio: banda estrecha (pasa-altos + shelf de agudos), saturación y comp.
+/// Radio: banda estrecha (pasa-altos + shelf de agudos), notch antifeedback,
+/// saturación y comp.
 fn radio() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 250.0 }),
+        module(DspModuleKind::Notch {
+            freq_hz: 1000.0,
+            q: 8.0,
+        }),
         module(DspModuleKind::Eq {
             bands: vec![
                 band(EqBandKind::Peaking, 1000.0, 6.0, 1.2),
@@ -106,10 +117,16 @@ fn radio() -> Vec<DspModuleSpec> {
     ]
 }
 
-/// Warm: bajos suaves, presencia vocal, compresión ligera y toque de reverb.
+/// Warm: bajos suaves con antifeedback (boominess), presencia vocal, compresión
+/// ligera y toque de reverb.
 fn warm() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 70.0 }),
+        module(DspModuleKind::BoomSuppressor {
+            threshold_db: -26.0,
+            freq_hz: 200.0,
+            amount: 0.5,
+        }),
         module(DspModuleKind::Eq {
             bands: vec![
                 band(EqBandKind::LowShelf, 120.0, 3.0, 0.8),
@@ -190,6 +207,25 @@ mod tests {
             assert!(
                 matches!(last.kind, DspModuleKind::Limiter { .. }),
                 "el último módulo de {preset:?} debería ser el limiter"
+            );
+        }
+    }
+
+    #[test]
+    fn non_dry_presets_include_antifeedback() {
+        for preset in [PresetId::VozLimpia, PresetId::Radio, PresetId::Warm] {
+            let specs = PresetFactory::specs(preset);
+            let has_antifeedback = specs.iter().any(|s| {
+                matches!(
+                    s.kind,
+                    DspModuleKind::HighPass { .. }
+                        | DspModuleKind::Notch { .. }
+                        | DspModuleKind::BoomSuppressor { .. }
+                )
+            });
+            assert!(
+                has_antifeedback,
+                "el preset {preset:?} no tiene antifeedback"
             );
         }
     }

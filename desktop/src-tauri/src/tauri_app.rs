@@ -74,12 +74,15 @@ fn list_devices() -> Result<DeviceListResponse, String> {
 }
 
 /// Arranca el motor con los dispositivos indicados (`None` = predeterminado).
+/// `buffer_size` (muestras/callback) es opcional: si es `None`, el core elige
+/// uno automáticamente según el tipo de dispositivo (heurística de latencia).
 #[tauri::command]
 fn start_engine(
     app: AppHandle,
     state: State<AppState>,
     input_device: Option<String>,
     output_device: Option<String>,
+    buffer_size: Option<usize>,
 ) -> Result<(), String> {
     let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
 
@@ -94,6 +97,7 @@ fn start_engine(
             AudioEngineConfig {
                 input_device,
                 output_device,
+                buffer_size,
                 ..Default::default()
             },
             on_frontend,

@@ -31,15 +31,17 @@ Objetivo: transformar la señal vocal con efectos de calidad baja en latencia.
 - [x] Reverb y delay con buffers de cola (pre-delay, feedback, mezcla).
 - [x] Medidores por canal (pre/post) y protección de *clipping* (`limiter`).
 - [x] Presets aplicables desde la cabina (Voz Limpia, Radio, Warm, …).
-- [ ] Ajuste fino de latencia por tamaño de buffer y heurística por dispositivo.
-- [ ] Antifeedback básico: high-pass, *notch* y supresión de *boominess*.
+- [x] Ajuste fino de latencia por tamaño de buffer y heurística por dispositivo.
+- [x] Antifeedback básico: high-pass, *notch* y supresión de *boominess*.
 
-Entregable: la cabina permite aplicar presets y la latencia se mantiene
-por debajo del umbral perceptible objetivo del plan.
+Entregable: la cabina permite aplicar presets, elegir el buffer (o dejarlo en
+"Auto" con heurística por dispositivo) y la cadena incluye antifeedback
+(pasa-altos, muesca y supresión de *boominess*), manteniendo la latencia por
+debajo del umbral perceptible objetivo del plan.
 
-> Pendientes de la Fase 1 (marcados arriba) y nota: el `high-pass` y la
-> protección de *clipping* ya están en la cadena; el ajuste fino de buffer y
-> el antifeedback completo quedan para fases posteriores junto con el slider IA.
+> La Fase 1 queda completa. Pendiente de fases posteriores: el slider de ajuste
+> fino por banda de EQ (actualmente los parámetros son fijos por preset) y el
+> asistente de IA.
 
 ## Fase 2 — IA: asistente vocal
 

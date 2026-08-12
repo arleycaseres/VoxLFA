@@ -61,11 +61,12 @@ mensajes JSON por el WebSocket para el móvil.
   "preset": "vozLimpia",
   "globalBypass": false,
   "links": [
-    { "name": "Pasa altos",  "enabled": true, "bypass": false },
-    { "name": "Ecualizador", "enabled": true, "bypass": false },
-    { "name": "De-esser",    "enabled": true, "bypass": false },
-    { "name": "Compresor",   "enabled": true, "bypass": false },
-    { "name": "Limiter",     "enabled": true, "bypass": false }
+    { "name": "highpass",       "enabled": true, "bypass": false },
+    { "name": "boomsuppressor", "enabled": true, "bypass": false },
+    { "name": "eq",             "enabled": true, "bypass": false },
+    { "name": "deesser",        "enabled": true, "bypass": false },
+    { "name": "compressor",     "enabled": true, "bypass": false },
+    { "name": "limiter",        "enabled": true, "bypass": false }
   ]
 }
 ```
@@ -105,10 +106,18 @@ La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
 ### `start`
 
 ```json
-{ "type": "start", "inputDevice": null, "outputDevice": null }
+{
+  "type": "start",
+  "inputDevice": null,
+  "outputDevice": null,
+  "bufferSize": null
+}
 ```
 
-Dispositivos `null` = predeterminado del sistema.
+- Dispositivos `null` = predeterminado del sistema.
+- `bufferSize` (muestras/callback) es **opcional**: `null` deja que el core lo
+  elija con una heurística por dispositivo (USB → 128, Bluetooth/HDMI → 1024,
+  resto → 256).
 
 ### `stop`
 
@@ -121,7 +130,7 @@ Dispositivos `null` = predeterminado del sistema.
 | Comando | Argumentos | Resultado |
 | --- | --- | --- |
 | `list_devices` | — | `{ inputs, outputs }` |
-| `start_engine` | `{ inputDevice, outputDevice }` | — |
+| `start_engine` | `{ inputDevice, outputDevice, bufferSize }` | — |
 | `stop_engine` | — | — |
 | `get_engine_status` | — | `EngineStatus \| null` |
 | `get_last_level` | — | `LevelSample \| null` |
@@ -131,6 +140,11 @@ Dispositivos `null` = predeterminado del sistema.
 | `set_global_bypass` | `{ bypass: boolean }` | `DspState` |
 | `set_link_bypass` | `{ name: string, bypass: boolean }` | `DspState` |
 | `get_pairing_info` | — | `{ code, port, lanAddress }` |
+
+- `bufferSize` en `start_engine` es opcional (`null` → heurística automática).
+- Los nombres de módulo de la cadena incluyen: `gain`, `highpass`, `notch`,
+  `boomsuppressor`, `eq`, `compressor`, `deesser`, `saturator`, `delay`,
+  `reverb`, `limiter`.
 
 - `apply_preset`/`set_global_bypass`/`set_link_bypass` devuelven el nuevo
   `DspState` y además emiten el evento `dsp`.

@@ -53,9 +53,9 @@ pub struct AudioEngineConfig {
     /// Frecuencia de muestreo objetivo (Hz). Se usa si ambos dispositivos la
     /// soportan; si no, se elige una compatible.
     pub sample_rate: u32,
-    /// Tamaño de buffer objetivo (muestras por callback). A menor tamaño,
-    /// menor latencia pero mayor riesgo de underrun.
-    pub buffer_size: usize,
+    /// Tamaño de buffer objetivo (muestras por callback). `None` → se elige
+    /// automáticamente con una heurística según el tipo de dispositivo.
+    pub buffer_size: Option<usize>,
     /// Dispositivo de entrada (micrófono). `None` → predeterminado del sistema.
     pub input_device: Option<String>,
     /// Dispositivo de salida (altavoces/interfaz). `None` → predeterminado.
@@ -68,7 +68,7 @@ impl Default for AudioEngineConfig {
     fn default() -> Self {
         Self {
             sample_rate: 48_000,
-            buffer_size: 256,
+            buffer_size: None,
             input_device: None,
             output_device: None,
             initial_preset: PresetId::Dry,
@@ -169,8 +169,13 @@ impl AudioEngine {
         // ring buffer sea una copia 1:1 sin resampling).
         let sample_rate = pick_sample_rate(&input, &output, config.sample_rate);
 
-        let input_config = build_stream_config(&input, Direction::Input, config.buffer_size)?;
-        let output_config = build_stream_config(&output, Direction::Output, config.buffer_size)?;
+        // Tamaño de buffer efectivo: el pedido o una heurística por dispositivo.
+        let buffer_size = config
+            .buffer_size
+            .unwrap_or_else(|| heuristic_buffer_size(&input_name, &output_name));
+
+        let input_config = build_stream_config(&input, Direction::Input, buffer_size)?;
+        let output_config = build_stream_config(&output, Direction::Output, buffer_size)?;
 
         // Buffer de anillo lock-free: puente captura → salida.
         let ring_capacity = sample_rate as usize * RING_CAPACITY_SECS as usize;
@@ -186,7 +191,7 @@ impl AudioEngine {
         // cadenas y las envía ya listas, de modo que en el callback no se
         // asigna memoria: solo se cambia el puntero y se libera la anterior.
         let (dsp_tx, dsp_rx) = mpsc::channel::<DspCommand>();
-        let max_frames = config.buffer_size.max(1);
+        let max_frames = buffer_size.max(1);
         let initial_chain = ChainProcessor::new(config.initial_preset, sample_rate, max_frames);
         let initial_state = initial_chain.state();
         let dsp_handle = DspHandle::new(
@@ -338,7 +343,7 @@ impl AudioEngine {
                 let _ = tx_thread.send(status_event(
                     EngineState::Running,
                     sample_rate,
-                    config.buffer_size,
+                    buffer_size,
                     0.0,
                     Some(input_name),
                     Some(output_name),
@@ -354,7 +359,7 @@ impl AudioEngine {
                 let _ = tx_thread.send(status_event(
                     EngineState::Stopped,
                     sample_rate,
-                    config.buffer_size,
+                    buffer_size,
                     0.0,
                     None,
                     None,
@@ -369,6 +374,48 @@ impl AudioEngine {
             dsp_handle,
         ))
     }
+}
+
+/// Elige un tamaño de buffer según el tipo de dispositivo detectado.
+///
+/// Heurística de "ajuste fino de latencia por dispositivo": los dispositivos
+/// con latencia inherente alta (Bluetooth, HDMI) reciben un buffer grande para
+/// evitar *underruns*; las interfaces USB profesionales, uno pequeño para
+/// minimizar latencia; el resto usa un valor equilibrado. El valor es un
+/// objetivo: `build_stream_config` lo valida contra el rango soportado.
+fn heuristic_buffer_size(input_name: &str, output_name: &str) -> usize {
+    let names = format!("{input_name} {output_name}").to_lowercase();
+
+    // Dispositivos de alta latencia inherente → buffer grande (estable).
+    const HIGH_LATENCY: &[&str] = &[
+        "bluetooth",
+        "wireless",
+        "hdmi",
+        "displayport",
+        "airpods",
+        "bluez",
+    ];
+    if HIGH_LATENCY.iter().any(|kw| names.contains(kw)) {
+        return 1024;
+    }
+
+    // Interfaces USB profesionales → buffer pequeño (baja latencia).
+    const LOW_LATENCY: &[&str] = &[
+        "usb",
+        "interface",
+        "scarlett",
+        "focusrite",
+        "steinberg",
+        "yamaha",
+        "presonus",
+        "rme",
+    ];
+    if LOW_LATENCY.iter().any(|kw| names.contains(kw)) {
+        return 128;
+    }
+
+    // Predeterminado equilibrado para el resto (micrófonos integrados, etc.).
+    256
 }
 
 /// Convierte un iterador de dispositivos en la lista de información tipada.
@@ -508,4 +555,38 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heuristic_prefers_small_buffer_for_usb_interfaces() {
+        assert_eq!(
+            heuristic_buffer_size("Micrófono (USB Audio)", "Altavoces (USB Audio)"),
+            128
+        );
+        assert_eq!(heuristic_buffer_size("Scarlett 2i2 USB", "Monitor 01"), 128);
+    }
+
+    #[test]
+    fn heuristic_uses_large_buffer_for_bluetooth_and_hdmi() {
+        assert_eq!(
+            heuristic_buffer_size("Micrófono (Bluetooth)", "AirPods"),
+            1024
+        );
+        assert_eq!(
+            heuristic_buffer_size("BuiltIn Microphone", "HDMI Output"),
+            1024
+        );
+    }
+
+    #[test]
+    fn heuristic_defaults_to_balanced() {
+        assert_eq!(
+            heuristic_buffer_size("BuiltIn Microphone", "BuiltIn Output"),
+            256
+        );
+    }
 }

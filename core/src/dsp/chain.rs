@@ -11,8 +11,8 @@
 use std::sync::{mpsc, Arc, Mutex};
 
 use crate::dsp::{
-    AudioProcessor, Compressor, DeEsser, Delay, Gain, HighPass, Limiter, ParametricEq,
-    ProcessResult, ProcessingInfo, Reverb, Saturator,
+    AudioProcessor, BoomSuppressor, Compressor, DeEsser, Delay, Gain, HighPass, Limiter, Notch,
+    ParametricEq, ProcessResult, ProcessingInfo, Reverb, Saturator,
 };
 use crate::error::Error;
 use crate::protocol::{
@@ -304,6 +304,8 @@ fn module_name(kind: &DspModuleKind) -> &'static str {
     match kind {
         DspModuleKind::Gain { .. } => "gain",
         DspModuleKind::HighPass { .. } => "highpass",
+        DspModuleKind::Notch { .. } => "notch",
+        DspModuleKind::BoomSuppressor { .. } => "boomsuppressor",
         DspModuleKind::Eq { .. } => "eq",
         DspModuleKind::Compressor { .. } => "compressor",
         DspModuleKind::DeEsser { .. } => "deesser",
@@ -323,6 +325,17 @@ fn build_processor(
     match spec.kind {
         DspModuleKind::Gain { gain_db } => Box::new(Gain::new(gain_db)),
         DspModuleKind::HighPass { cutoff_hz } => Box::new(HighPass::new(cutoff_hz, sample_rate)),
+        DspModuleKind::Notch { freq_hz, q } => Box::new(Notch::new(freq_hz, q, sample_rate)),
+        DspModuleKind::BoomSuppressor {
+            threshold_db,
+            freq_hz,
+            amount,
+        } => Box::new(BoomSuppressor::new(
+            threshold_db,
+            freq_hz,
+            amount,
+            sample_rate,
+        )),
         DspModuleKind::Eq { bands } => Box::new(ParametricEq::new(bands, sample_rate, max_frames)),
         DspModuleKind::Compressor {
             threshold_db,

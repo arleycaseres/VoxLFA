@@ -18,6 +18,8 @@ pub enum BiquadKind {
     HighPass,
     /// Banda de pico (campana) con ganancia ajustable.
     Peaking,
+    /// Muesca (notch): elimina una frecuencia concreta (antifeedback).
+    Notch,
     /// Shelf de graves.
     LowShelf,
     /// Shelf de agudos.
@@ -89,6 +91,7 @@ impl BiquadCoeffs {
                 -2.0 * cos,
                 1.0 - alpha / a,
             ),
+            BiquadKind::Notch => (1.0, -2.0 * cos, 1.0, 1.0 + alpha, -2.0 * cos, 1.0 - alpha),
             BiquadKind::LowShelf => {
                 let b0 = a * ((a + 1.0) - (a - 1.0) * cos + two_sqrt_a_alpha);
                 let b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos);
@@ -246,6 +249,28 @@ mod tests {
             (gain - expected).abs() < 0.4,
             "peaking gain {gain:.2} != {expected:.2}"
         );
+    }
+
+    #[test]
+    fn notch_removes_center_frequency() {
+        // Un seno en la frecuencia del notch debe salir muy atenuado.
+        let mut f = BiquadFilter::design(
+            BiquadParams {
+                kind: BiquadKind::Notch,
+                freq_hz: 1000.0,
+                gain_db: 0.0,
+                q: 30.0,
+            },
+            48_000,
+        );
+        let sr = 48_000.0;
+        let n = 4096;
+        let input: Vec<f32> = (0..n)
+            .map(|i| (2.0 * PI * 1000.0 * i as f32 / sr).sin() * 0.1)
+            .collect();
+        let out = run(&mut f, &input);
+        let gain = rms(&out[n / 2..]) / rms(&input[n / 2..]);
+        assert!(gain < 0.05, "notch gain {gain:.3} no atenúa la frecuencia");
     }
 
     fn rms(x: &[f32]) -> f32 {

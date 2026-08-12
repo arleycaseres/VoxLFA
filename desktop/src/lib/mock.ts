@@ -66,13 +66,29 @@ const FAKE_PRESETS: PresetInfo[] = [
 /** Nombres de módulo por preset (espejo de `PresetFactory::specs`). */
 const PRESET_LINKS: Record<PresetId, string[]> = {
   dry: [],
-  vozLimpia: ["highpass", "eq", "deesser", "compressor", "limiter"],
-  radio: ["highpass", "eq", "saturator", "compressor", "limiter"],
-  warm: ["highpass", "eq", "compressor", "reverb", "limiter"],
+  vozLimpia: ["highpass", "boomsuppressor", "eq", "deesser", "compressor", "limiter"],
+  radio: ["highpass", "notch", "eq", "saturator", "compressor", "limiter"],
+  warm: ["highpass", "boomsuppressor", "eq", "compressor", "reverb", "limiter"],
 };
 
 /** Cada cuánto se emite una muestra de nivel (ms), igual que el core. */
 const LEVEL_EMIT_INTERVAL_MS = 50;
+
+/**
+ * Heurística de buffer por dispositivo (espejo de la del core): USB → 128,
+ * Bluetooth/HDMI → 1024, resto → 256.
+ */
+function heuristicBufferSize(): number {
+  const names = [...FAKE_DEVICES.inputs, ...FAKE_DEVICES.outputs]
+    .filter((d) => d.isDefault)
+    .map((d) => d.name.toLowerCase())
+    .join(" ");
+  if (/(bluetooth|wireless|hdmi|displayport)/.test(names)) return 1024;
+  if (/(usb|interface|scarlett|focusrite|steinberg|yamaha|presonus|rme)/.test(names)) {
+    return 128;
+  }
+  return 256;
+}
 
 type Listener = (event: EngineEvent) => void;
 
@@ -162,9 +178,10 @@ export function listDevices(): Promise<DeviceList> {
   return Promise.resolve(FAKE_DEVICES);
 }
 
-export function startEngine(): Promise<void> {
+export function startEngine(requested?: number | null): Promise<void> {
   return new Promise((resolve) => {
     state = "starting";
+    bufferSize = requested ?? heuristicBufferSize();
     syncStatus();
     setTimeout(() => {
       state = "running";

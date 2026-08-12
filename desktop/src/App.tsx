@@ -8,6 +8,7 @@ import { useEngine } from "./hooks/useEngine";
 import { Dial } from "./components/Dial";
 import { Meter } from "./components/Meter";
 import { DeviceSelector } from "./components/DeviceSelector";
+import { BufferSelector } from "./components/BufferSelector";
 import { StatusPill } from "./components/StatusPill";
 import { PairingBadge } from "./components/PairingBadge";
 import { PresetCard } from "./components/PresetCard";
@@ -24,6 +25,7 @@ export default function App() {
   const engine = useEngine();
   const [inputName, setInputName] = useState<string | null>(null);
   const [outputName, setOutputName] = useState<string | null>(null);
+  const [bufferSize, setBufferSize] = useState<number | null>(null);
 
   const running = IS_RUNNING(engine.status?.state);
   const busy = engine.busy;
@@ -68,13 +70,22 @@ export default function App() {
             onChange={setOutputName}
             disabled={running || busy}
           />
+          <BufferSelector
+            value={bufferSize}
+            onChange={setBufferSize}
+            disabled={running || busy}
+          />
 
           <div className="controls__actions">
             <button
               type="button"
               className={`btn ${running ? "btn--stop" : "btn--start"}`}
               disabled={busy}
-              onClick={() => (running ? engine.stop() : engine.start(inputName, outputName))}
+              onClick={() =>
+                running
+                  ? engine.stop()
+                  : engine.start(inputName, outputName, bufferSize)
+              }
             >
               {busy ? "…" : running ? "Detener" : "Arrancar"}
             </button>

@@ -43,14 +43,16 @@ export function listDevices(): Promise<DeviceList> {
   return inTauri() ? invoke<DeviceList>("list_devices") : mock.listDevices();
 }
 
-/** Arranca el motor con los dispositivos dados (`null` = predeterminado). */
+/** Arranca el motor con los dispositivos dados (`null` = predeterminado).
+ *  `bufferSize` (`null` = auto por heurística de dispositivo). */
 export function startEngine(
   inputDevice: string | null,
   outputDevice: string | null,
+  bufferSize?: number | null,
 ): Promise<void> {
   return inTauri()
-    ? invoke<void>("start_engine", { inputDevice, outputDevice })
-    : mock.startEngine();
+    ? invoke<void>("start_engine", { inputDevice, outputDevice, bufferSize })
+    : mock.startEngine(bufferSize);
 }
 
 /** Detiene el motor y libera el dispositivo de audio. */

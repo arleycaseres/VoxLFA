@@ -44,14 +44,18 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
 
 - `audio::AudioEngine`: crea los streams de entrada y salida con `cpal`,
   conecta captura → salida mediante un **ring buffer lock-free** (`ringbuf`)
-  y mide la latencia como el tiempo que tarda cada muestra en recorrerlo.
+  y mide la latencia como el tiempo que tarda cada muestra en recorrerlo. El
+  tamaño de buffer es configurable; si no se pide, lo elige una **heurística
+  por dispositivo** (USB → 128, Bluetooth/HDMI → 1024, resto → 256).
 - `audio::EngineHandle`: control asíncrono del motor (`request_stop`,
   `join`) sin tocar los streams desde fuera del hilo de audio.
 - `dsp`: trait `AudioProcessor` + procesadores reales:
   - **Filtros**: `BiquadFilter`/`BiquadKind` (peaking, low-shelf, high-shelf,
-    paso banda), `HighPass`, `ParametricEq` (hasta 11 bandas).
+    paso banda, notch), `HighPass`, `Notch` (muesca antifeedback),
+    `ParametricEq` (hasta 11 bandas).
   - **Dinámica**: `Compressor` (envolvente pico, ganancia suavizada en dB),
-    `DeEsser` (banda de 6 kHz con envolvente), `Limiter` (con lookahead).
+    `DeEsser` (banda de 6 kHz con envolvente), `Limiter` (con lookahead),
+    `BoomSuppressor` (reducción dinámica de la banda baja-media ~200–300 Hz).
   - **Tiempo/color**: `Saturator` (tanh), `Delay` (feedback, mezcla),
     `Reverb` (Schroeder: 4 comb + 2 allpass), `Gain`, `PassThroughProcessor`.
   - **Cadena**: `ChainProcessor` encadena módulos en orden, mide latencia
@@ -59,7 +63,8 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
     reconfigurar en vivo (`DspCommand`: aplicar preset, bypass global, bypass
     de módulo) conmutando cadenas preconstruidas en un hilo de control.
 - `dsp::presets::PresetFactory`: `vozLimpia`, `radio` y `warm` (todas terminan
-  en un limiter de seguridad).
+  en un limiter de seguridad e incluyen antifeedback: pasa-altos + muesca y/o
+  supresión de *boominess*).
 - `protocol`: contratos serde de eventos y comandos (ver `docs/protocolo.md`),
   incluida la especificación DSP (`protocol/dsp.rs`) que es la única fuente de
   configuración JSON.
@@ -151,11 +156,9 @@ es mínimo (la métrica real se lee en cada bloque).
 
 ## Límites de la Fase 1
 
-- La cadena DSP se configura con **presets y bypass** (no hay parámetros finos
-  por slider todavía: EQ/compresor ajustables a mano quedan para una fase
-  posterior).
-- Los parámetros de cada módulo son fijos por preset (las especificaciones viven
-  en `dsp::presets`).
+- La cadena DSP se configura con **presets y bypass** (los parámetros de cada
+  módulo son fijos por preset; el slider fino por banda de EQ queda para una
+  fase posterior).
 - El móvil solo monitorea; no controla la cadena (se planea en una fase posterior).
 - Sin persistencia de configuración ni autodetección de la IP del escritorio.
 - La Fase 2 añadirá el asistente de IA (análisis vocal y ajuste automático).

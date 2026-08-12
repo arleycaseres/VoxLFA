@@ -9,6 +9,8 @@ import type { DspState } from "../lib/types";
 const MODULE_LABELS: Record<string, string> = {
   gain: "Ganancia",
   highpass: "Pasa-altos",
+  notch: "Muesca",
+  boomsuppressor: "Antiboom",
   eq: "Ecualizador",
   compressor: "Compresor",
   deesser: "De-esser",
@@ -21,6 +23,8 @@ const MODULE_LABELS: Record<string, string> = {
 const MODULE_ICONS: Record<string, string> = {
   gain: "▲",
   highpass: "↗",
+  notch: "⊘",
+  boomsuppressor: "◢",
   eq: "≋",
   compressor: "⇉",
   deesser: "S",

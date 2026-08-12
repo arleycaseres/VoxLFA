@@ -48,8 +48,13 @@ export interface EngineController {
   error: string | null;
   /** `true` mientras una operación de arranque/parada está en curso. */
   busy: boolean;
-  /** Arranca el motor con los dispositivos indicados (`null` = default). */
-  start: (input?: string | null, output?: string | null) => Promise<void>;
+  /** Arranca el motor con los dispositivos indicados (`null` = default).
+   *  `bufferSize` (`null` = auto por heurística de dispositivo). */
+  start: (
+    input?: string | null,
+    output?: string | null,
+    bufferSize?: number | null,
+  ) => Promise<void>;
   /** Detiene el motor. */
   stop: () => Promise<void>;
   /** Vuelve a detectar dispositivos de audio. */
@@ -86,11 +91,11 @@ export function useEngine(): EngineController {
   }, []);
 
   const start = useCallback(
-    async (input?: string | null, output?: string | null) => {
+    async (input?: string | null, output?: string | null, bufferSize?: number | null) => {
       setBusy(true);
       setError(null);
       try {
-        await startEngine(input ?? null, output ?? null);
+        await startEngine(input ?? null, output ?? null, bufferSize ?? null);
       } catch (err) {
         setError(String(err));
       } finally {
