@@ -1,0 +1,42 @@
+# -----------------------------------------------------------------------------
+# voxlfa-core — Motor DSP + IA de VoxLFA
+#
+# Es la biblioteca compartida ("el cerebro") que se reutiliza en todas las
+# plataformas. Reglas de diseño:
+#   * NO depende de la UI ni de Tauri.
+#   * El procesamiento de audio es puro (sin I/O) y está en `dsp/`.
+#   * La captura/salida de audio (cpal) es opcional y vive detrás del feature
+#     `audio`, que solo habilita el escritorio.
+#   * El contrato de datos con la UI y el móvil vive en `protocol/` (serde).
+#
+# Se compila como `rlib` (para el desktop) y `cdylib` (para exponer FFI a
+# otras plataformas en el futuro).
+# -----------------------------------------------------------------------------
+[package]
+name = "voxlfa-core"
+description = "Motor DSP + IA de VoxLFA, compartido entre desktop y móvil."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+keywords = ["audio", "dsp", "voxlfa", "realtime", "machine-learning"]
+categories = ["multimedia::audio"]
+publish = false
+
+[lib]
+name = "voxlfa_core"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Habilita el motor de audio en tiempo real (captura → procesado → salida)
+# basado en cpal y el buffer de anillo lock-free.
+audio = ["dep:cpal", "dep:ringbuf"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+cpal = { version = "0.16", optional = true }
+ringbuf = { version = "0.4", optional = true }

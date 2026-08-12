@@ -1,0 +1,29 @@
+/* Tokens de diseño de VoxLFA — cabina técnica/3D.
+   Base #0B0D0F (carbón), paneles #16181C (grafito), acento LFA naranja
+   #FF4A1F y cian #4FD8FF para espectro/ondas. Ver frontend.md. */
+
+:root {
+  /* Superficies */
+  --color-bg: #0b0d0f;
+  --color-panel: #16181c;
+  --color-panel-2: #1e2228;
+  --color-border: #2a2e34;
+
+  /* Acentos de marca */
+  --color-accent: #ff4a1f;
+  --color-cyan: #4fd8ff;
+
+  /* Texto */
+  --color-text: #e6e9ec;
+  --color-text-dim: #8a929c;
+
+  /* Tipografía (auto-hospedada, ver fonts.css) */
+  --font-display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  /* Sombras y brillos */
+  --shadow-panel: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --glow-cyan: 0 0 12px rgba(79, 216, 255, 0.35);
+  --glow-orange: 0 0 12px rgba(255, 74, 31, 0.4);
+}

@@ -1,0 +1,125 @@
+// Acceso tipado a Tauri. La UI NUNCA llama `invoke`/`listen` directamente:
+// todo pasa por estas funciones para mantener el contrato en un solo sitio.
+//
+// Nota: los nombres de argumento van en camelCase porque Tauri v2 convierte
+// los parámetros snake_case de Rust a camelCase en el lado JS por defecto.
+
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import * as mock from "./mock";
+import type {
+  DeviceList,
+  DspState,
+  EngineEvent,
+  EngineStatus,
+  LevelSample,
+  PresetId,
+  PresetInfo,
+} from "./types";
+
+/** `true` dentro de la ventana real de Tauri; `false` en un navegador plano. */
+function inTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/** Información de emparejamiento mostrada al usuario para conectar el móvil. */
+export interface PairingInfo {
+  /** Código de emparejamiento actual (6 caracteres). */
+  code: string;
+  /** Puerto del WebSocket del servidor de eventos. */
+  port: number;
+  /** Dirección LAN del equipo o `null` si no se pudo resolver. */
+  lanAddress: string | null;
+}
+
+/** Estados que el frontend puede solicitar al backend. */
+export interface DeviceListRequest {
+  inputDevice: string | null;
+  outputDevice: string | null;
+}
+
+/** Lista los dispositivos de audio disponibles en el sistema. */
+export function listDevices(): Promise<DeviceList> {
+  return inTauri() ? invoke<DeviceList>("list_devices") : mock.listDevices();
+}
+
+/** Arranca el motor con los dispositivos dados (`null` = predeterminado). */
+export function startEngine(
+  inputDevice: string | null,
+  outputDevice: string | null,
+): Promise<void> {
+  return inTauri()
+    ? invoke<void>("start_engine", { inputDevice, outputDevice })
+    : mock.startEngine();
+}
+
+/** Detiene el motor y libera el dispositivo de audio. */
+export function stopEngine(): Promise<void> {
+  return inTauri() ? invoke<void>("stop_engine") : mock.stopEngine();
+}
+
+/** Lee el último estado conocido del motor (o `null` si aún no arrancó). */
+export function getEngineStatus(): Promise<EngineStatus | null> {
+  return inTauri()
+    ? invoke<EngineStatus | null>("get_engine_status")
+    : mock.getEngineStatus();
+}
+
+/** Lee el código de emparejamiento y la dirección LAN actuales. */
+export function getPairingInfo(): Promise<PairingInfo> {
+  return inTauri()
+    ? invoke<PairingInfo>("get_pairing_info")
+    : mock.getPairingInfo();
+}
+
+/** Lee el último nivel medido (para el renderizado inicial de la UI). */
+export function getLastLevel(): Promise<LevelSample | null> {
+  return inTauri()
+    ? invoke<LevelSample | null>("get_last_level")
+    : mock.getLastLevel();
+}
+
+/** Lista los presets de la cabina con sus metadatos. */
+export function getPresets(): Promise<PresetInfo[]> {
+  return inTauri() ? invoke<PresetInfo[]>("get_presets") : mock.getPresets();
+}
+
+/** Lee el último estado de la cadena DSP (o `null` si el motor no corre). */
+export function getDspState(): Promise<DspState | null> {
+  return inTauri()
+    ? invoke<DspState | null>("get_dsp_state")
+    : mock.getDspState();
+}
+
+/** Aplica un preset a la cadena DSP en vivo. */
+export function applyPreset(preset: PresetId): Promise<void> {
+  return inTauri()
+    ? invoke<void>("apply_preset", { preset })
+    : mock.applyPreset(preset);
+}
+
+/** Activa o desactiva el bypass global de la cadena DSP. */
+export function setGlobalBypass(bypass: boolean): Promise<void> {
+  return inTauri()
+    ? invoke<void>("set_global_bypass", { bypass })
+    : mock.setGlobalBypass(bypass);
+}
+
+/** Activa o desactiva el bypass de un módulo por su nombre. */
+export function setLinkBypass(link: string, bypass: boolean): Promise<void> {
+  return inTauri()
+    ? invoke<void>("set_link_bypass", { link, bypass })
+    : mock.setLinkBypass(link, bypass);
+}
+
+/**
+ * Se suscribe a los eventos del motor. Devuelve una función para cancelar la
+ * suscripción.
+ */
+export async function onEngineEvent(
+  handler: (event: EngineEvent) => void,
+): Promise<UnlistenFn> {
+  return inTauri()
+    ? listen<EngineEvent>("engine-event", (event) => handler(event.payload))
+    : (mock.onEngineEvent(handler) as UnlistenFn);
+}

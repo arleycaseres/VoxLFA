@@ -1,0 +1,6 @@
+# Convenciones de formato para todo el código Rust del monorepo.
+# Se aplican con: cargo fmt
+edition = "2021"
+max_width = 100
+use_small_heuristics = "Default"
+newline_style = "Unix"

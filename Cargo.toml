@@ -1,0 +1,29 @@
+# -----------------------------------------------------------------------------
+# Cargo workspace — VoxLFA monorepo
+#
+# Agrupa todos los crates Rust del proyecto para construir/probar en conjunto:
+#   - core: el "cerebro" DSP + IA (biblioteca compartida reutilizable)
+#   - desktop: la aplicación de escritorio Tauri v2 (cáscara nativa de la UI)
+# El crate del core también se compila como cdylib para poder exponerse vía FFI
+# en el futuro (por ejemplo, para versiones móviles que procesen audio local).
+# -----------------------------------------------------------------------------
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "desktop/src-tauri",
+]
+
+# Metadatos compartidos entre todos los miembros del workspace.
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.77"
+
+# Dependencias compartidas: aquí se centraliza la versión de cada crate para
+# que todos los miembros usen exactamente la misma.
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

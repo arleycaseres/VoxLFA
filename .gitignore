@@ -1,0 +1,38 @@
+# --- Node.js / npm ---
+node_modules/
+dist/
+*.local
+.vite/
+
+# --- Rust / Cargo ---
+target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# --- Tauri ---
+desktop/src-tauri/gen/
+desktop/src-tauri/target/
+desktop/src-tauri/icons/icon.ico
+desktop/src-tauri/icons/icon.icns
+desktop/src-tauri/icons/icon.png
+
+# --- Expo / React Native ---
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/*.tsbuildinfo
+mobile/android/
+mobile/ios/
+
+# --- Sistema operativo / editores ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# --- Logs y temporales ---
+*.log
+/tmp/

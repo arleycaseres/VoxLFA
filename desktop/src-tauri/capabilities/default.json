@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permisos por defecto de la ventana principal de VoxLFA.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

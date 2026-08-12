@@ -1,0 +1,59 @@
+/* Medidor de barra vertical. */
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+.meter__track {
+  position: relative;
+  flex: 1;
+  width: 14px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #0c0e10, #14171b);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+/* Relleno: cian en la zona normal, degradado hacia naranja arriba. */
+.meter__fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, var(--color-cyan), #2e9cb8);
+  border-radius: 2px 2px 0 0;
+  transition: height 60ms linear;
+}
+
+.meter--hot .meter__fill {
+  background: linear-gradient(180deg, var(--color-accent), #ff7a3d);
+}
+
+/* Marca flotante del pico. */
+.meter__peak {
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  height: 2px;
+  background: var(--color-text);
+  border-radius: 1px;
+  transition: bottom 60ms linear;
+}
+
+.meter__label {
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+.meter__value {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--color-text-dim);
+}

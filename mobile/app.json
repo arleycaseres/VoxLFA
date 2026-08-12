@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "VoxLFA Monitor",
+    "slug": "voxlfa-monitor",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0b0d0f",
+    "primaryColor": "#ff4a1f",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "backgroundColor": "#0b0d0f",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.voxlfa.monitor"
+    },
+    "android": {
+      "package": "com.voxlfa.monitor",
+      "edgeToEdgeEnabled": true
+    }
+  }
+}
