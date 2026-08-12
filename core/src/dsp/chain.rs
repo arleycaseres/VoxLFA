@@ -318,6 +318,32 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Reemplaza las bandas del ecualizador del preset activo por las indicadas
+    /// (un solo intercambio de procesador, sin reconstruir el resto de la cadena).
+    ///
+    /// Se usa para aplicar los ajustes finos persistidos de un perfil al
+    /// arrancar el motor y como base de [`DspHandle::set_eq_band`].
+    ///
+    /// Devuelve error si el preset actual no tiene módulo EQ.
+    pub fn set_eq_bands(&self, bands: Vec<EqBand>) -> Result<()> {
+        let mut state = self.get_state()?;
+        let eq = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "eq")
+            .ok_or_else(|| Error::audio("el preset actual no tiene módulo ecualizador"))?;
+        eq.eq_bands = Some(bands.clone());
+
+        let processor = ParametricEq::new(bands.clone(), self.sample_rate, self.max_frames);
+        self.send(DspCommand::SetLinkProcessor {
+            name: "eq".to_string(),
+            processor: Box::new(processor),
+            eq_bands: Some(bands),
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Ajusta la ganancia de una banda del ecualizador del preset activo en vivo.
     ///
     /// El nuevo EQ se construye aquí (hilo de control) con la banda modificada
@@ -326,26 +352,18 @@ impl DspHandle {
     /// Devuelve error si el preset actual no tiene módulo EQ o si el índice de
     /// banda no existe.
     pub fn set_eq_band(&self, index: usize, gain_db: f32) -> Result<()> {
-        let mut state = self.get_state()?;
-        let bands = state
+        let mut bands = self
+            .get_state()?
             .links
-            .iter_mut()
+            .iter()
             .find(|link| link.name == "eq")
-            .and_then(|link| link.eq_bands.as_mut())
+            .and_then(|link| link.eq_bands.clone())
             .ok_or_else(|| Error::audio("el preset actual no tiene módulo ecualizador"))?;
         let band = bands
             .get_mut(index)
             .ok_or_else(|| Error::audio(format!("band index fuera de rango: {index}")))?;
         band.gain_db = gain_db;
-
-        let processor = ParametricEq::new(bands.clone(), self.sample_rate, self.max_frames);
-        self.send(DspCommand::SetLinkProcessor {
-            name: "eq".to_string(),
-            processor: Box::new(processor),
-            eq_bands: Some(bands.clone()),
-        })?;
-        self.publish(state);
-        Ok(())
+        self.set_eq_bands(bands)
     }
 
     /// Último estado de la cadena (espejo del hilo de control).

@@ -8,10 +8,11 @@
 use serde::{Deserialize, Serialize};
 
 /// Identificador de un preset de la cabina.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PresetId {
     /// Sin procesamiento: paso directo de la señal.
+    #[default]
     Dry,
     /// Voz limpia: EQ suave y compresión transparente.
     VozLimpia,

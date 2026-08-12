@@ -162,6 +162,28 @@ La cadena no se toca desde el hilo de audio:
 3. El callback de audio solo ve el puntero nuevo en la siguiente iteración;
    actualiza `Arc<Mutex<DspState>>` y emite `EngineEvent::Dsp`.
 
+## Persistencia y perfiles por dispositivo
+
+La configuración de la cabina se guarda en `config.json` y se reaplica al
+volver a conectar el mismo dispositivo:
+
+1. `voxlfa-core/config.rs` define el esquema (`AppConfig` + `DeviceProfile`) y
+   un `ConfigStore` tolerante a fallos (archivo ausente/corrupto → vacío).
+   La ruta es `$XDG_CONFIG_HOME/voxlfa/config.json` (o `~/.config/…`).
+2. `EngineManager` (desktop) orquesta la persistencia:
+   - Al **arrancar**, aplica el perfil del dispositivo elegido (preset como
+     `initial_preset` y, después de levantar el pipeline, `set_eq_bands` + los
+     bypasses) — reaplica el ajuste fino con un único intercambio del EQ.
+   - Al **cambiar preset/bypasses**, los persiste al instante.
+   - El **ajuste fino del EQ** se actualiza en memoria y se vuelca al detener
+     el motor (evita escribir el archivo en cada paso del slider).
+3. `get_config` expone la configuración a la UI para precargar los selectores
+   (validando que el dispositivo siga conectado).
+
+La clave de perfil es el nombre del dispositivo de entrada (o `"default"` si se
+usa el predeterminado del sistema): no hay heurística de identificación más
+fiable y documenta la limitación ante cambios de nombre/puerto USB.
+
 ## Latencia
 
 La latencia captura→salida se mide como el número de muestras en el ring
@@ -189,10 +211,14 @@ es mínimo (la métrica real se lee en cada bloque).
 | Análisis sin FFT (bandas con biquads) | O(n), sin dependencia extra y sin asignación en el callback |
 | Análisis en hilo dedicado + canal acotado | Las sugerencias y los `String` no tocan el camino de audio |
 | `DspCommand` sin `Debug` | Evita `unwrap`/`expect` y simplifica el patrón |
+| Perfiles por dispositivo de entrada (nombre) | Recuerda preset/EQ/bypass al reconectar el mismo dispositivo |
+| `set_eq_bands` (reaplica el perfil al arrancar) | Un solo intercambio del EQ, sin reconstruir el resto de la cadena |
+| EQ fino en memoria + volcado al detener | No escribe `config.json` en cada paso del slider |
+| Config tolerante a fallos (best-effort) | Un archivo corrupto nunca impide arrancar la sesión |
 | WebSocket con token en la URL | Autenticación simple y sin estado |
 | Tipos espejo en tres lenguajes | Contrato único y verificable |
 
-## Límites de la Fase 2
+## Límites y pendientes
 
 - El análisis usa **reglas heurísticas** sobre bandas de biquads (sin FFT ni
   modelo entrenado); los umbrales de `suggest.rs` se afinan con voz real.
@@ -200,7 +226,7 @@ es mínimo (la métrica real se lee en cada bloque).
   generación de presets a medida queda para una fase posterior.
 - El móvil **solo monitorea** el análisis y las sugerencias (el bloque 5,
   control desde el móvil con autenticación mutua, quedó fuera de la Fase 2).
-- Los ajustes finos del EQ **no se persisten**: se pierden al cambiar de preset
-  o reiniciar el motor (la persistencia y los perfiles por dispositivo están
-  planificados en la Fase 3).
-- Sin persistencia de configuración ni autodetección de la IP del escritorio.
+- El perfil se indexa por el **nombre del dispositivo de entrada**: si el
+  sistema cambia el nombre (p. ej. al mover un USB de puerto), el perfil se
+  pierde para ese dispositivo (no hay identificación por hardware).
+- Sin autodetección de la IP del escritorio para el móvil.

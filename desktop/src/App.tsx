@@ -3,7 +3,7 @@
 // Fase 2: asistente vocal local (análisis en vivo, sugerencias accionables con
 // confirmación y resumen de sesión exportable) sobre la cabina de la Fase 1.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEngine } from "./hooks/useEngine";
 import { Dial } from "./components/Dial";
 import { Meter } from "./components/Meter";
@@ -28,6 +28,32 @@ export default function App() {
   const [inputName, setInputName] = useState<string | null>(null);
   const [outputName, setOutputName] = useState<string | null>(null);
   const [bufferSize, setBufferSize] = useState<number | null>(null);
+  const prefilled = useRef(false);
+
+  // Precarga los selectores con la última selección persistida (si el
+  // dispositivo sigue conectado). Solo la primera vez que hay config y lista.
+  useEffect(() => {
+    if (prefilled.current || !engine.config || !engine.devices) return;
+    const config = engine.config;
+    const inputs = engine.devices?.inputs ?? [];
+    const outputs = engine.devices?.outputs ?? [];
+    if (
+      config.defaultInput &&
+      inputs.some((device) => device.name === config.defaultInput)
+    ) {
+      setInputName(config.defaultInput);
+    }
+    if (
+      config.defaultOutput &&
+      outputs.some((device) => device.name === config.defaultOutput)
+    ) {
+      setOutputName(config.defaultOutput);
+    }
+    if (config.bufferSize != null) {
+      setBufferSize(config.bufferSize);
+    }
+    prefilled.current = true;
+  }, [engine.config, engine.devices]);
 
   const running = IS_RUNNING(engine.status?.state);
   const busy = engine.busy;
@@ -214,7 +240,7 @@ export default function App() {
           Salida: <strong>{engine.status?.outputDevice ?? "—"}</strong>
         </span>
         <span className="app__footer-item app__footer-item--mono">
-          v0.3.0 · EQ por banda
+          v0.4.0 · ajustes guardados por dispositivo
         </span>
       </footer>
     </div>

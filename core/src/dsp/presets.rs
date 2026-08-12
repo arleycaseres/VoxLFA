@@ -44,6 +44,20 @@ impl PresetFactory {
             PresetId::Warm => warm(),
         }
     }
+
+    /// Bandas por defecto del ecualizador de un preset (vacío si no tiene EQ).
+    ///
+    /// Se usa para restablecer el ajuste fino al aplicar un preset y para
+    /// guardar los perfiles por dispositivo.
+    pub fn eq_bands(preset: PresetId) -> Vec<EqBand> {
+        Self::specs(preset)
+            .into_iter()
+            .find_map(|spec| match spec.kind {
+                DspModuleKind::Eq { bands } => Some(bands),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// Voz limpia: pasa-altos, antifeedback (boominess), EQ suave, de-esser,

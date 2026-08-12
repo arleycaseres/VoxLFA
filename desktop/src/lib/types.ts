@@ -106,6 +106,36 @@ export interface DeviceList {
   outputs: AudioDeviceInfo[];
 }
 
+/**
+ * Perfil recordado por dispositivo de entrada (config persistida del usuario).
+ * No forma parte del contrato de red con el móvil: es un esquema local del
+ * escritorio (espejo de `core/src/config.rs`).
+ */
+export interface DeviceProfile {
+  /** Nombre del dispositivo de entrada, o `"default"` si se usó el del sistema. */
+  deviceKey: string;
+  /** Preset recordado para este dispositivo. */
+  preset: PresetId;
+  /** Ajuste fino del EQ (bandas actuales) para el preset de este perfil. */
+  eqBands: EqBand[];
+  /** `true` si el bypass global estaba activo al guardar. */
+  globalBypass: boolean;
+  /** Bypass por módulo que estaba activo al guardar. */
+  linkBypass: Record<string, boolean>;
+}
+
+/** Configuración persistida de la app (`config.json` del usuario). */
+export interface AppConfig {
+  /** Última entrada elegida (`null` = predeterminada del sistema). */
+  defaultInput: string | null;
+  /** Última salida elegida (`null` = predeterminada del sistema). */
+  defaultOutput: string | null;
+  /** Último tamaño de buffer (`null` = auto por heurística). */
+  bufferSize: number | null;
+  /** Perfiles guardados, uno por dispositivo de entrada. */
+  profiles: DeviceProfile[];
+}
+
 /** Métricas de la voz sobre la ventana deslizante de análisis (dBFS). */
 export interface VoiceMetrics {
   /** Nivel RMS medio de la ventana en dBFS. */

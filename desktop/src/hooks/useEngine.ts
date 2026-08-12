@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   AnalysisSample,
+  AppConfig,
   DeviceList,
   DspState,
   EngineEvent,
@@ -19,6 +20,7 @@ import {
   applyPreset,
   applySuggestion,
   getAnalysis,
+  getConfig,
   getDspState,
   getEngineStatus,
   getLastLevel,
@@ -46,6 +48,8 @@ export interface EngineController {
   pairing: PairingInfo | null;
   /** Presets de la cabina disponibles. */
   presets: PresetInfo[] | null;
+  /** Configuración persistida (para precargar selectores y perfiles). */
+  config: AppConfig | null;
   /** Último estado de la cadena DSP (o `null` si el motor no corre). */
   dsp: DspState | null;
   /** Última muestra de análisis vocal (métricas + sugerencias de IA). */
@@ -93,6 +97,7 @@ export function useEngine(): EngineController {
   const [devices, setDevices] = useState<DeviceList | null>(null);
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   const [presets, setPresets] = useState<PresetInfo[] | null>(null);
+  const [config, setConfig] = useState<AppConfig | null>(null);
   const [dsp, setDsp] = useState<DspState | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisSample | null>(null);
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(
@@ -224,20 +229,23 @@ export function useEngine(): EngineController {
     const unsubscribe = onEngineEvent(applyEvent).catch(() => undefined);
 
     (async () => {
-      const [status, level, pairing, presets, dsp, analysis] = await Promise.allSettled([
-        getEngineStatus(),
-        getLastLevel(),
-        getPairingInfo(),
-        getPresets(),
-        getDspState(),
-        getAnalysis(),
-      ]);
+      const [status, level, pairing, presets, config, dsp, analysis] =
+        await Promise.allSettled([
+          getEngineStatus(),
+          getLastLevel(),
+          getPairingInfo(),
+          getPresets(),
+          getConfig(),
+          getDspState(),
+          getAnalysis(),
+        ]);
       if (cancelled) return;
       if (status.status === "fulfilled") setStatus(status.value);
       if (level.status === "fulfilled" && level.value) setLevel(level.value);
       if (pairing.status === "fulfilled") setPairing(pairing.value);
       if (presets.status === "fulfilled" && presets.value)
         setPresets(presets.value);
+      if (config.status === "fulfilled") setConfig(config.value);
       if (dsp.status === "fulfilled" && dsp.value) setDsp(dsp.value);
       if (analysis.status === "fulfilled" && analysis.value)
         setAnalysis(analysis.value);
@@ -257,6 +265,7 @@ export function useEngine(): EngineController {
     devices,
     pairing,
     presets,
+    config,
     dsp,
     analysis,
     sessionSummary,

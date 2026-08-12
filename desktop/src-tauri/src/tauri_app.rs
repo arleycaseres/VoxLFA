@@ -9,8 +9,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::broadcast;
 use voxlfa_core::audio::AudioEngineConfig;
+use voxlfa_core::config::AppConfig;
 use voxlfa_core::protocol::{
-    AnalysisSample, AudioDeviceInfo, DspState, EngineEvent, EngineStatus, PresetInfo,
+    AnalysisSample, AudioDeviceInfo, DspState, EngineEvent, EngineStatus, PresetId, PresetInfo,
     SessionSummary,
 };
 
@@ -179,46 +180,46 @@ fn apply_suggestion(state: State<AppState>, suggestion_id: u8) -> Result<(), Str
         .map_err(|err| err.to_string())
 }
 
-/// Aplica un preset a la cadena DSP en vivo.
+/// Aplica un preset a la cadena DSP en vivo (y lo persiste en el perfil del
+/// dispositivo actual).
 #[tauri::command]
 fn apply_preset(state: State<AppState>, preset: PresetId) -> Result<(), String> {
-    let engine = state.engine.lock().map_err(|err| err.to_string())?;
-    let dsp = engine
-        .dsp_handle()
-        .ok_or_else(|| "el motor no está corriendo".to_string())?;
-    dsp.apply_preset(preset).map_err(|err| err.to_string())
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.apply_preset(preset).map_err(|err| err.to_string())
 }
 
-/// Activa o desactiva el bypass global de la cadena DSP.
+/// Activa o desactiva el bypass global de la cadena DSP (y lo persiste).
 #[tauri::command]
 fn set_global_bypass(state: State<AppState>, bypass: bool) -> Result<(), String> {
-    let engine = state.engine.lock().map_err(|err| err.to_string())?;
-    let dsp = engine
-        .dsp_handle()
-        .ok_or_else(|| "el motor no está corriendo".to_string())?;
-    dsp.set_global_bypass(bypass).map_err(|err| err.to_string())
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine
+        .set_global_bypass(bypass)
+        .map_err(|err| err.to_string())
 }
 
-/// Activa o desactiva el bypass de un módulo por su nombre.
+/// Activa o desactiva el bypass de un módulo por su nombre (y lo persiste).
 #[tauri::command]
 fn set_link_bypass(state: State<AppState>, link: String, bypass: bool) -> Result<(), String> {
-    let engine = state.engine.lock().map_err(|err| err.to_string())?;
-    let dsp = engine
-        .dsp_handle()
-        .ok_or_else(|| "el motor no está corriendo".to_string())?;
-    dsp.set_link_bypass(&link, bypass)
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine
+        .set_link_bypass(link, bypass)
         .map_err(|err| err.to_string())
 }
 
 /// Ajusta la ganancia de una banda del EQ del preset activo en vivo.
 #[tauri::command]
 fn set_eq_band(state: State<AppState>, band_index: usize, gain_db: f32) -> Result<(), String> {
-    let engine = state.engine.lock().map_err(|err| err.to_string())?;
-    let dsp = engine
-        .dsp_handle()
-        .ok_or_else(|| "el motor no está corriendo".to_string())?;
-    dsp.set_eq_band(band_index, gain_db)
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine
+        .set_eq_band(band_index, gain_db)
         .map_err(|err| err.to_string())
+}
+
+/// Devuelve la configuración persistida (para precargar la cabina).
+#[tauri::command]
+fn get_config(state: State<AppState>) -> Result<AppConfig, String> {
+    let engine = state.engine.lock().map_err(|err| err.to_string())?;
+    Ok(engine.get_config())
 }
 
 /// Datos de emparejamiento para conectar la app móvil por WebSocket.
@@ -248,6 +249,7 @@ pub fn run() {
             set_global_bypass,
             set_link_bypass,
             set_eq_band,
+            get_config,
             get_analysis,
             get_session_summary,
             apply_suggestion,

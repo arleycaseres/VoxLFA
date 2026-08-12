@@ -179,3 +179,52 @@ fn set_eq_band_rejects_missing_eq_or_bad_index() {
     let _ = dry;
     let _ = warm;
 }
+
+#[test]
+fn set_eq_bands_replaces_all_bands_at_once() {
+    let (cmd_tx, cmd_rx) = mpsc::channel::<DspCommand>();
+    let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
+    let handle = DspHandle::new(cmd_tx, event_tx, PresetId::VozLimpia, 48_000, 256);
+
+    let mut bands = handle
+        .get_state()
+        .unwrap()
+        .links
+        .iter()
+        .find(|link| link.name == "eq")
+        .and_then(|link| link.eq_bands.clone())
+        .expect("preset vozLimpia incluye eq");
+    bands[1].gain_db = 7.5;
+    handle.set_eq_bands(bands).unwrap();
+
+    match cmd_rx.recv().unwrap() {
+        DspCommand::SetLinkProcessor {
+            name,
+            processor,
+            eq_bands,
+        } => {
+            assert_eq!(name, "eq");
+            let received = eq_bands.expect("lleva bandas");
+            assert_eq!(received.len(), 3);
+            assert_eq!(received[1].gain_db, 7.5);
+            assert_eq!(processor.name(), "eq");
+        }
+        _ => panic!("esperaba SetLinkProcessor"),
+    }
+
+    match event_rx.recv().unwrap() {
+        EngineEvent::Dsp(state) => {
+            let eq = state.links.iter().find(|link| link.name == "eq").unwrap();
+            assert_eq!(eq.eq_bands.as_ref().unwrap()[1].gain_db, 7.5);
+        }
+        other => panic!("esperaba Dsp, obtuve {other:?}"),
+    }
+}
+
+#[test]
+fn set_eq_bands_rejects_preset_without_eq() {
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<DspCommand>();
+    let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>();
+    let dry = DspHandle::new(cmd_tx, event_tx, PresetId::Dry, 48_000, 256);
+    assert!(dry.set_eq_bands(vec![]).is_err());
+}

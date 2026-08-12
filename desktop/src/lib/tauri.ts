@@ -9,6 +9,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as mock from "./mock";
 import type {
   AnalysisSample,
+  AppConfig,
   DeviceList,
   DspState,
   EngineEvent,
@@ -93,6 +94,11 @@ export function getDspState(): Promise<DspState | null> {
   return inTauri()
     ? invoke<DspState | null>("get_dsp_state")
     : mock.getDspState();
+}
+
+/** Lee la configuración persistida (para precargar la cabina). */
+export function getConfig(): Promise<AppConfig> {
+  return inTauri() ? invoke<AppConfig>("get_config") : mock.getConfig();
 }
 
 /** Aplica un preset a la cadena DSP en vivo. */

@@ -188,6 +188,7 @@ La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
 | `get_last_level` | — | `LevelSample \| null` |
 | `get_presets` | — | `PresetInfo[]` |
 | `get_dsp_state` | — | `DspState \| null` |
+| `get_config` | — | `AppConfig` |
 | `apply_preset` | `{ preset: PresetId }` | `DspState` |
 | `set_global_bypass` | `{ bypass: boolean }` | `DspState` |
 | `set_link_bypass` | `{ name: string, bypass: boolean }` | `DspState` |
@@ -201,6 +202,40 @@ La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
 - Los nombres de módulo de la cadena incluyen: `gain`, `highpass`, `notch`,
   `boomsuppressor`, `eq`, `compressor`, `deesser`, `saturator`, `delay`,
   `reverb`, `limiter`.
+
+## Configuración persistida (solo escritorio)
+
+`AppConfig` (comando `get_config`) es el esquema del `config.json` del usuario
+(`$XDG_CONFIG_HOME/voxlfa/config.json`). **No** es parte del contrato con el
+móvil: solo lo consume la cabina para precargar los selectores.
+
+```json
+{
+  "defaultInput": "Interfaz Scarlett 2i2",
+  "defaultOutput": "Monitor 01",
+  "bufferSize": 128,
+  "profiles": [
+    {
+      "deviceKey": "Interfaz Scarlett 2i2",
+      "preset": "warm",
+      "eqBands": [
+        { "kind": "lowShelf", "freqHz": 120, "gainDb": 3, "q": 0.8 }
+      ],
+      "globalBypass": false,
+      "linkBypass": { "reverb": true }
+    }
+  ]
+}
+```
+
+- `profiles` guarda un perfil por **dispositivo de entrada** (`deviceKey` es el
+  nombre del dispositivo, o `"default"` si se usó el predeterminado del
+  sistema).
+- Al arrancar el motor con un dispositivo con perfil, se aplican su preset,
+  sus `eqBands` y sus bypasses. `apply_preset`/`set_*_bypass` persisten al
+  instante; el ajuste fino del EQ (`set_eq_band`) se vuelca al detener el motor.
+- Archivo tolerante a fallos: si falta o está corrupto se parte de la
+  configuración vacía.
 
 - `apply_preset`/`set_global_bypass`/`set_link_bypass` devuelven el nuevo
   `DspState` y además emiten el evento `dsp`.

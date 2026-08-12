@@ -7,6 +7,7 @@
 
 import type {
   AnalysisSample,
+  AppConfig,
   DeviceList,
   DspLinkState,
   DspState,
@@ -93,6 +94,14 @@ const PRESET_EQ: Record<PresetId, EqBand[]> = {
     { kind: "peaking", freqHz: 2500, gainDb: 1.5, q: 1.5 },
     { kind: "highShelf", freqHz: 7000, gainDb: -2, q: 0.8 },
   ],
+};
+
+/** Configuración simulada (vacía: sin perfiles ni valores recordados). */
+const FAKE_CONFIG: AppConfig = {
+  defaultInput: null,
+  defaultOutput: null,
+  bufferSize: null,
+  profiles: [],
 };
 
 /** Cada cuánto se emite una muestra de nivel (ms), igual que el core. */
@@ -443,6 +452,10 @@ export function getPresets(): Promise<PresetInfo[]> {
 
 export function getDspState(): Promise<DspState | null> {
   return Promise.resolve(state === "stopped" ? null : dspState);
+}
+
+export function getConfig(): Promise<AppConfig> {
+  return Promise.resolve(FAKE_CONFIG);
 }
 
 export function applyPreset(preset: PresetId): Promise<void> {

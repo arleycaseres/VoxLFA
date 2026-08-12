@@ -57,8 +57,8 @@ Objetivo: ajustar el EQ por banda, en vivo y sin reiniciar el motor.
 - [x] El móvil refleja las bandas del EQ en modo solo lectura.
 - [x] Verificación completa (fmt, clippy, 83 tests, builds desktop y móvil).
 
-> Los ajustes finos son **por sesión**: se pierden al cambiar de preset o
-> reiniciar el motor (la persistencia está planificada en la Fase 3).
+> Los ajustes finos se aplican **en vivo** y (desde la Fase 3) se guardan por
+> dispositivo de entrada para reaplicarlos al reiniciar.
 
 ## Fase 2 — IA: asistente vocal ✅ (bloques 1-4)
 
@@ -83,9 +83,30 @@ análisis en modo monitoreo.
 > Pendiente de la Fase 2: el bloque 5 (control del motor desde el móvil con
 > autenticación mutua) se dejó fuera de esta tanda por decisión de producto.
 
+## Fase 3 — Persistencia y perfiles por dispositivo ✅
+
+Objetivo: que la cabina recuerde la configuración del usuario y la reaplique al
+volver a conectar el mismo dispositivo.
+
+- [x] Esquema de configuración en `voxlfa-core` (`config.rs`): `AppConfig` con
+      perfiles por dispositivo de entrada (`DeviceProfile`: preset, bandas del
+      EQ, bypasses) y selector de dispositivos/buffer recordados.
+- [x] Persistencia en `config.json` (`$XDG_CONFIG_HOME/voxlfa/config.json`),
+      tolerante a fallos (archivo ausente/corrupto → configuración vacía).
+- [x] `DspHandle::set_eq_bands`: reaplica el ajuste fino del EQ de un perfil de
+      una vez (sin reconstruir el resto de la cadena).
+- [x] `EngineManager` orquesta la persistencia: aplica el perfil al arrancar,
+      guarda preset/bypasses al cambiar, vuelca el EQ fino al detener.
+- [x] Comando `get_config` y precarga de los selectores de la cabina con la
+      última selección (si el dispositivo sigue conectado).
+- [x] Verificación completa (fmt, clippy, 97 tests, builds desktop y móvil).
+
+> La clave de perfil es el **nombre del dispositivo de entrada** elegido
+> (`"default"` si se usa el predeterminado del sistema). Si el nombre cambia
+> (p. ej. se mueve de puerto USB), se parte de cero para ese nombre.
+
 ## Fase 3+ — Pulido y distribución
 
-- [ ] Persistencia de configuración y perfiles por dispositivo.
 - [ ] Paquetes de instalación (deb/AppImage/msi, APK).
 - [ ] Autodetección de escritorios en la red para el móvil (mDNS).
 - [ ] Telemetría opcional y anónima (con consentimiento y CSP acotada).

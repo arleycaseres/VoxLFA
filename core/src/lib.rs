@@ -52,6 +52,7 @@
 #![warn(missing_docs)]
 
 pub mod analysis;
+pub mod config;
 pub mod dsp;
 pub mod error;
 pub mod protocol;
