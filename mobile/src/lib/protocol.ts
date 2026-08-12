@@ -41,11 +41,24 @@ export interface LevelSample {
 /** Identificador de un preset de la cabina. */
 export type PresetId = "dry" | "vozLimpia" | "radio" | "warm";
 
+/** Banda de un ecualizador paramétrico. */
+export interface EqBand {
+  kind: EqBandKind;
+  freqHz: number;
+  gainDb: number;
+  q: number;
+}
+
+/** Tipo de banda del ecualizador. */
+export type EqBandKind = "lowShelf" | "peaking" | "highShelf";
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
   enabled: boolean;
   bypass: boolean;
+  /** Bandas actuales del EQ si este módulo es el ecualizador; si no, `null`. */
+  eqBands: EqBand[] | null;
 }
 
 /** Estado completo de la cadena DSP activa. */

@@ -52,6 +52,19 @@ const KIND_TEXT: Record<Suggestion["kind"], string> = {
   resonance: "Resonancia",
 };
 
+/** Etiqueta en español de cada tipo de banda del EQ. */
+const EQ_KIND_TEXT: Record<string, string> = {
+  lowShelf: "Shelf graves",
+  peaking: "Pico",
+  highShelf: "Shelf agudos",
+};
+
+/** Formatea una frecuencia en Hz a una etiqueta compacta. */
+function formatFreq(freqHz: number): string {
+  if (freqHz >= 1000) return `${(freqHz / 1000).toFixed(1)} kHz`;
+  return `${freqHz} Hz`;
+}
+
 interface MonitorViewProps {
   status: EngineStatus | null;
   level: LevelSample | null;
@@ -144,6 +157,54 @@ export function MonitorView({ status, level, dsp, analysis }: MonitorViewProps) 
         <InfoRow label="Buffer" value={status ? `${status.bufferSize} smp` : "—"} />
         <InfoRow label="Entrada" value={status?.inputDevice ?? "—"} />
         <InfoRow label="Salida" value={status?.outputDevice ?? "—"} />
+      </View>
+
+      {/* Ecualizador del preset activo (solo lectura) */}
+      <View style={styles.infoCard}>
+        <Text style={styles.cardTitle}>ECUALIZADOR</Text>
+        {!dsp ? (
+          <Text style={styles.emptyText}>Sin datos del ecualizador.</Text>
+        ) : (
+          (() => {
+            const eq = dsp.links.find((link) => link.name === "eq");
+            const bands = eq?.eqBands ?? null;
+            if (!bands || bands.length === 0) {
+              return (
+                <Text style={styles.emptyText}>
+                  El preset activo no tiene ecualizador.
+                </Text>
+              );
+            }
+            return (
+              <View style={styles.eqGrid}>
+                {bands.map((band, index) => (
+                  <View
+                    key={`${band.kind}-${band.freqHz}-${index}`}
+                    style={[
+                      styles.eqCell,
+                      band.gainDb > 0
+                        ? styles.eqCellBoost
+                        : band.gainDb < 0
+                          ? styles.eqCellCut
+                          : null,
+                    ]}
+                  >
+                    <Text style={styles.eqCellKind}>
+                      {EQ_KIND_TEXT[band.kind] ?? band.kind}
+                    </Text>
+                    <Text style={styles.eqCellFreq}>
+                      {formatFreq(band.freqHz)}
+                    </Text>
+                    <Text style={styles.eqCellGain}>
+                      {band.gainDb > 0 ? "+" : ""}
+                      {band.gainDb.toFixed(1)} dB
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })()
+        )}
       </View>
 
       {/* Asistente vocal (solo lectura: el control es del escritorio) */}
@@ -379,6 +440,45 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  eqGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  eqCell: {
+    flexGrow: 1,
+    flexBasis: "40%",
+    backgroundColor: "#0c0e10",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#2a2e34",
+    padding: 8,
+    gap: 2,
+  },
+  eqCellBoost: {
+    borderColor: "#4fd8ff",
+  },
+  eqCellCut: {
+    borderColor: "#8a929c",
+  },
+  eqCellKind: {
+    color: "#8a929c",
+    fontSize: 9,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    fontFamily: "monospace",
+  },
+  eqCellFreq: {
+    color: "#8a929c",
+    fontSize: 10,
+    fontFamily: "monospace",
+  },
+  eqCellGain: {
+    color: "#e6e9ec",
+    fontSize: 13,
+    fontFamily: "monospace",
+    fontWeight: "700",
   },
   metricCell: {
     flexGrow: 1,

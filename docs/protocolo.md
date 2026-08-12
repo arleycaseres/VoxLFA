@@ -61,12 +61,21 @@ mensajes JSON por el WebSocket para el móvil.
   "preset": "vozLimpia",
   "globalBypass": false,
   "links": [
-    { "name": "highpass",       "enabled": true, "bypass": false },
-    { "name": "boomsuppressor", "enabled": true, "bypass": false },
-    { "name": "eq",             "enabled": true, "bypass": false },
-    { "name": "deesser",        "enabled": true, "bypass": false },
-    { "name": "compressor",     "enabled": true, "bypass": false },
-    { "name": "limiter",        "enabled": true, "bypass": false }
+    { "name": "highpass",       "enabled": true, "bypass": false, "eqBands": null },
+    { "name": "boomsuppressor", "enabled": true, "bypass": false, "eqBands": null },
+    {
+      "name": "eq",
+      "enabled": true,
+      "bypass": false,
+      "eqBands": [
+        { "kind": "lowShelf", "freqHz": 200,  "gainDb": -2,   "q": 0.8 },
+        { "kind": "peaking",  "freqHz": 3000, "gainDb": 2,    "q": 1.5 },
+        { "kind": "highShelf","freqHz": 8000, "gainDb": 1.5,  "q": 0.8 }
+      ]
+    },
+    { "name": "deesser",        "enabled": true, "bypass": false, "eqBands": null },
+    { "name": "compressor",     "enabled": true, "bypass": false, "eqBands": null },
+    { "name": "limiter",        "enabled": true, "bypass": false, "eqBands": null }
   ]
 }
 ```
@@ -77,6 +86,9 @@ mensajes JSON por el WebSocket para el móvil.
 - `enabled`: el módulo existe en el preset; `bypass`: está puenteado
   individualmente. Si `globalBypass` es `true`, la entrada va directa a la
   salida sin pasar por ningún módulo.
+- `eqBands`: solo lo lleva el módulo `eq`; es la configuración **actual** del
+  ecualizador (bandas, frecuencias, ganancias y Q), que cambia con el comando
+  `set_eq_band`. Los demás módulos lo envían a `null`.
 - `latencyMs` (ver evento `status`) ya **incluye** la latencia propia de la
   cadena (p. ej. el limiter suma su lookahead).
 
@@ -179,6 +191,7 @@ La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
 | `apply_preset` | `{ preset: PresetId }` | `DspState` |
 | `set_global_bypass` | `{ bypass: boolean }` | `DspState` |
 | `set_link_bypass` | `{ name: string, bypass: boolean }` | `DspState` |
+| `set_eq_band` | `{ bandIndex: number, gainDb: number }` | `DspState` |
 | `get_analysis` | — | `AnalysisSample \| null` |
 | `get_session_summary` | — | `SessionSummary \| null` |
 | `apply_suggestion` | `{ suggestionId: number }` | — |
@@ -191,7 +204,10 @@ La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
 
 - `apply_preset`/`set_global_bypass`/`set_link_bypass` devuelven el nuevo
   `DspState` y además emiten el evento `dsp`.
-- Estos tres comandos exigen el motor **en marcha**; si está detenido devuelven
+- `set_eq_band` ajusta en vivo la ganancia de la banda `bandIndex` (0-based) del
+  ecualizador del preset activo; emite un evento `dsp` con las bandas nuevas.
+  Devuelve error si el preset no tiene EQ o el índice está fuera de rango.
+- Estos cuatro comandos exigen el motor **en marcha**; si está detenido devuelven
   error (`EngineNotRunning`). `get_dsp_state` no exige motor en marcha.
 - `get_analysis` devuelve la última muestra de análisis (incluida la de la
   última sesión) y `get_session_summary` el resumen acumulado de la sesión

@@ -16,7 +16,7 @@ use crate::dsp::{
 };
 use crate::error::Error;
 use crate::protocol::{
-    DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent, PresetId,
+    DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent, EqBand, PresetId,
 };
 use crate::Result;
 
@@ -32,6 +32,9 @@ struct ChainLink {
     bypass: bool,
     /// Procesador real.
     processor: Box<dyn AudioProcessor>,
+    /// Bandas actuales del EQ si este eslabón es el ecualizador; `None` si no.
+    /// Se reemplaza junto con el procesador en los ajustes finos.
+    eq_bands: Option<Vec<EqBand>>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -74,11 +77,15 @@ impl ChainProcessor {
         self.global_bypass = false;
         self.links = PresetFactory::specs(preset)
             .into_iter()
-            .map(|spec| ChainLink {
-                name: module_name(&spec.kind),
-                enabled: spec.enabled,
-                bypass: false,
-                processor: build_processor(spec, self.sample_rate, self.max_frames),
+            .map(|spec| {
+                let eq_bands = eq_bands_of(&spec.kind);
+                ChainLink {
+                    name: module_name(&spec.kind),
+                    enabled: spec.enabled,
+                    bypass: false,
+                    processor: build_processor(spec, self.sample_rate, self.max_frames),
+                    eq_bands,
+                }
             })
             .collect();
     }
@@ -101,6 +108,29 @@ impl ChainProcessor {
         self.global_bypass = bypass;
     }
 
+    /// Reemplaza el procesador de un módulo por su nombre.
+    ///
+    /// El procesador nuevo llega **ya construido** desde el hilo de control
+    /// (aquí solo se intercambia el puntero, sin asignar memoria). Se usa para
+    /// los ajustes finos, p. ej. reconstruir el EQ con una banda modificada.
+    ///
+    /// Devuelve `true` si el módulo existe y se actualizó.
+    pub fn set_link_processor(
+        &mut self,
+        name: &str,
+        processor: Box<dyn AudioProcessor>,
+        eq_bands: Option<Vec<EqBand>>,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == name) {
+            Some(link) => {
+                link.processor = processor;
+                link.eq_bands = eq_bands;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -113,6 +143,7 @@ impl ChainProcessor {
                     name: link.name.to_string(),
                     enabled: link.enabled,
                     bypass: link.bypass,
+                    eq_bands: link.eq_bands.clone(),
                 })
                 .collect(),
         }
@@ -187,6 +218,17 @@ pub enum DspCommand {
         /// `true` para omitir el módulo en tiempo real.
         bypass: bool,
     },
+    /// Reemplazar el procesador de un módulo por uno ya construido (ajuste fino,
+    /// p. ej. el EQ con una banda modificada). El hilo de audio solo intercambia
+    /// el puntero.
+    SetLinkProcessor {
+        /// Nombre del módulo (identificador de la cadena).
+        name: String,
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Bandas del EQ si el módulo reemplazado es el ecualizador; `None` si no.
+        eq_bands: Option<Vec<EqBand>>,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -224,6 +266,7 @@ impl DspHandle {
                     name: module_name(&spec.kind).to_string(),
                     enabled: spec.enabled,
                     bypass: false,
+                    eq_bands: eq_bands_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -275,6 +318,36 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Ajusta la ganancia de una banda del ecualizador del preset activo en vivo.
+    ///
+    /// El nuevo EQ se construye aquí (hilo de control) con la banda modificada
+    /// y se envía ya listo al hilo de audio, que solo intercambia el puntero.
+    ///
+    /// Devuelve error si el preset actual no tiene módulo EQ o si el índice de
+    /// banda no existe.
+    pub fn set_eq_band(&self, index: usize, gain_db: f32) -> Result<()> {
+        let mut state = self.get_state()?;
+        let bands = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "eq")
+            .and_then(|link| link.eq_bands.as_mut())
+            .ok_or_else(|| Error::audio("el preset actual no tiene módulo ecualizador"))?;
+        let band = bands
+            .get_mut(index)
+            .ok_or_else(|| Error::audio(format!("band index fuera de rango: {index}")))?;
+        band.gain_db = gain_db;
+
+        let processor = ParametricEq::new(bands.clone(), self.sample_rate, self.max_frames);
+        self.send(DspCommand::SetLinkProcessor {
+            name: "eq".to_string(),
+            processor: Box::new(processor),
+            eq_bands: Some(bands.clone()),
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -313,6 +386,14 @@ fn module_name(kind: &DspModuleKind) -> &'static str {
         DspModuleKind::Delay { .. } => "delay",
         DspModuleKind::Reverb { .. } => "reverb",
         DspModuleKind::Limiter { .. } => "limiter",
+    }
+}
+
+/// Bandas del EQ de una especificación de módulo, o `None` si no es un EQ.
+fn eq_bands_of(kind: &DspModuleKind) -> Option<Vec<EqBand>> {
+    match kind {
+        DspModuleKind::Eq { bands } => Some(bands.clone()),
+        _ => None,
     }
 }
 

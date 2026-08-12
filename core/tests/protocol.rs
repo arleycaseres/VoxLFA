@@ -104,7 +104,7 @@ fn control_command_start_uses_camel_case() {
 
 #[test]
 fn engine_event_dsp_serializes_with_type_tag() {
-    use voxlfa_core::protocol::{DspLinkState, DspState, PresetId};
+    use voxlfa_core::protocol::{DspLinkState, DspState, EqBand, EqBandKind, PresetId};
 
     let event = EngineEvent::Dsp(DspState {
         preset: PresetId::VozLimpia,
@@ -113,6 +113,12 @@ fn engine_event_dsp_serializes_with_type_tag() {
             name: "eq".into(),
             enabled: true,
             bypass: false,
+            eq_bands: Some(vec![EqBand {
+                kind: EqBandKind::Peaking,
+                freq_hz: 3000.0,
+                gain_db: 2.0,
+                q: 1.5,
+            }]),
         }],
     });
 
@@ -121,12 +127,17 @@ fn engine_event_dsp_serializes_with_type_tag() {
     assert!(json.contains("\"preset\":\"vozLimpia\""));
     assert!(json.contains("\"globalBypass\":false"));
     assert!(json.contains("\"links\":"));
+    // Las bandas del EQ viajan en camelCase dentro del estado del eslabón.
+    assert!(json.contains("\"eqBands\":"));
+    assert!(json.contains("\"freqHz\":3000.0"));
+    assert!(json.contains("\"gainDb\":2.0"));
 
     let decoded: EngineEvent = serde_json::from_str(&json).unwrap();
     match decoded {
         EngineEvent::Dsp(state) => {
             assert_eq!(state.preset, PresetId::VozLimpia);
             assert_eq!(state.links[0].name, "eq");
+            assert_eq!(state.links[0].eq_bands.as_ref().unwrap().len(), 1);
         }
         other => panic!("esperaba Dsp, obtuve {other:?}"),
     }

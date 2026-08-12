@@ -39,9 +39,26 @@ Entregable: la cabina permite aplicar presets, elegir el buffer (o dejarlo en
 (pasa-altos, muesca y supresión de *boominess*), manteniendo la latencia por
 debajo del umbral perceptible objetivo del plan.
 
-> La Fase 1 queda completa. Pendiente de fases posteriores: el slider de ajuste
-> fino por banda de EQ (actualmente los parámetros son fijos por preset) y el
-> asistente de IA.
+> La Fase 1 queda completa. Pendiente de fases posteriores: el asistente de IA
+> (entregado en la Fase 2).
+
+## Fase 1.1 — Ajuste fino del ecualizador ✅
+
+Objetivo: ajustar el EQ por banda, en vivo y sin reiniciar el motor.
+
+- [x] El estado de la cadena (`DspLinkState`) expone las bandas actuales del
+      ecualizador (`eqBands`) en los tres lados (Rust, TS desktop, TS móvil).
+- [x] Comando `set_eq_band` (desktop): reconstruye solo el módulo EQ en el hilo
+      de control con la ganancia nueva y la conmuta en el callback de audio
+      (`DspCommand::SetLinkProcessor`), sin asignar memoria en el camino real.
+- [x] Cabina: panel "Ecualizador" con un slider por banda (rango −18…+18 dB,
+      paso 0.1 dB) y botón de restablecimiento a 0 dB; se deshabilita con el
+      motor parado o el EQ en bypass.
+- [x] El móvil refleja las bandas del EQ en modo solo lectura.
+- [x] Verificación completa (fmt, clippy, 83 tests, builds desktop y móvil).
+
+> Los ajustes finos son **por sesión**: se pierden al cambiar de preset o
+> reiniciar el motor (la persistencia está planificada en la Fase 3).
 
 ## Fase 2 — IA: asistente vocal ✅ (bloques 1-4)
 

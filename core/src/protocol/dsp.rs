@@ -176,6 +176,9 @@ pub struct DspLinkState {
     pub enabled: bool,
     /// `true` si está en bypass (se omite en tiempo real, sin reiniciar).
     pub bypass: bool,
+    /// Bandas actuales del ecualizador si este módulo es el EQ; `None` en los
+    /// demás módulos. Refleja los ajustes finos aplicados con `set_eq_band`.
+    pub eq_bands: Option<Vec<EqBand>>,
 }
 
 /// Estado completo de la cadena DSP activa.

@@ -210,6 +210,17 @@ fn set_link_bypass(state: State<AppState>, link: String, bypass: bool) -> Result
         .map_err(|err| err.to_string())
 }
 
+/// Ajusta la ganancia de una banda del EQ del preset activo en vivo.
+#[tauri::command]
+fn set_eq_band(state: State<AppState>, band_index: usize, gain_db: f32) -> Result<(), String> {
+    let engine = state.engine.lock().map_err(|err| err.to_string())?;
+    let dsp = engine
+        .dsp_handle()
+        .ok_or_else(|| "el motor no está corriendo".to_string())?;
+    dsp.set_eq_band(band_index, gain_db)
+        .map_err(|err| err.to_string())
+}
+
 /// Datos de emparejamiento para conectar la app móvil por WebSocket.
 #[tauri::command]
 fn get_pairing_info(state: State<AppState>) -> Result<PairingInfo, String> {
@@ -236,6 +247,7 @@ pub fn run() {
             apply_preset,
             set_global_bypass,
             set_link_bypass,
+            set_eq_band,
             get_analysis,
             get_session_summary,
             apply_suggestion,

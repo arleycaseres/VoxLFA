@@ -5,8 +5,9 @@ base (motor de audio de baja latencia, cabina de escritorio y monitor móvil
 remoto); la **Fase 1** añade el DSP real: una cadena encadenable de módulos
 vocal (EQ, compresor, de-esser, saturación, delay, reverb, limiter, pasa-altos,
 ganancia) con presets aplicables en vivo, bypass por módulo y global, y niveles
-de salida pre/post. La **Fase 2** añade el asistente vocal local: análisis de la
-voz en vivo (sin FFT ni nube), sugerencias accionables con confirmación y
+de salida pre/post. La **Fase 1.1** añade el ajuste fino del ecualizador por
+banda (sliders en vivo). La **Fase 2** añade el asistente vocal local: análisis
+de la voz en vivo (sin FFT ni nube), sugerencias accionables con confirmación y
 resumen de sesión exportable.
 
 ## Principios
@@ -63,7 +64,11 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
   - **Cadena**: `ChainProcessor` encadena módulos en orden, mide latencia
     acumulada y aplica bypass por módulo o global; `DspHandle` permite
     reconfigurar en vivo (`DspCommand`: aplicar preset, bypass global, bypass
-    de módulo) conmutando cadenas preconstruidas en un hilo de control.
+    de módulo y reemplazo de un módulo completo) conmutando cadenas o
+    procesadores preconstruidos en un hilo de control. El **ajuste fino del
+    EQ** (`DspHandle::set_eq_band`) reconstruye solo el `ParametricEq` con la
+    banda modificada y lo conmuta por puntero; las bandas actuales viajan en
+    el estado (`DspLinkState::eq_bands`).
 - `dsp::presets::PresetFactory`: `vozLimpia`, `radio` y `warm` (todas terminan
   en un limiter de seguridad e incluyen antifeedback: pasa-altos + muesca y/o
   supresión de *boominess*).
@@ -106,9 +111,9 @@ Cáscara de escritorio que orquesta el core:
 - `src-tauri/src/pairing.rs`: genera códigos de 6 caracteres sin caracteres
   ambiguos (`0/O`, `1/I/l`).
 - `src-tauri/src/tauri_app.rs` (feature `webview`): comandos expuestos a la UI,
-  incluidos `apply_preset`, `set_global_bypass` y `set_link_bypass`, que
-  reconfiguran la cadena DSP en vivo vía `EngineManager`, y los de análisis:
-  `get_analysis`, `get_session_summary` y `apply_suggestion`.
+  incluidos `apply_preset`, `set_global_bypass`, `set_link_bypass` y
+  `set_eq_band`, que reconfiguran la cadena DSP en vivo vía `EngineManager`, y
+  los de análisis: `get_analysis`, `get_session_summary` y `apply_suggestion`.
 
 La UI (React/TS) accede a Tauri **solo** a través de `src/lib/tauri.ts`; el
 estado se consume con el hook `useEngine` (que también replica la cabina con un
@@ -136,8 +141,9 @@ exponencial.
 4. El hilo de análisis desliza la ventana, evalúa sugerencias, mantiene el
    resumen de sesión (consultable vía `AnalysisHandle`) y emite
    `EngineEvent::Analysis` (máx. cada ~500 ms).
-5. Cuando el estado DSP cambia (preset o bypass), el motor emite `EngineEvent::Dsp`
-   con la nueva cadena; el escritorio lo difunde igual que el resto.
+5. Cuando el estado DSP cambia (preset, bypass o ajuste de EQ), el motor emite
+   `EngineEvent::Dsp` con la nueva cadena (incluidas las bandas del EQ); el
+   escritorio lo difunde igual que el resto.
 6. `EngineManager` (forwarder) actualiza el estado compartido y reenvía:
    - a la UI como evento Tauri `engine-event`;
    - al WebSocket como JSON serializado.
@@ -147,9 +153,12 @@ exponencial.
 
 La cadena no se toca desde el hilo de audio:
 
-1. La UI llama `apply_preset`/`set_*_bypass` → `DspCommand` por canal mpsc.
-2. El hilo de control de `DspHandle` construye la cadena nueva (aquí sí se puede
-   asignar memoria) y la intercambia atómicamente con la activa.
+1. La UI llama `apply_preset`/`set_*_bypass`/`set_eq_band` → `DspCommand` por
+   canal mpsc.
+2. El hilo de control de `DspHandle` construye la cadena (o el módulo EQ)
+   nueva —aquí sí se puede asignar memoria— y la intercambia atómicamente con
+   la activa. Para el EQ fino solo se reemplaza el procesador del eslabón `eq`
+   (`SetLinkProcessor`), sin reconstruir reverb/delay ni perder su estado.
 3. El callback de audio solo ve el puntero nuevo en la siguiente iteración;
    actualiza `Arc<Mutex<DspState>>` y emite `EngineEvent::Dsp`.
 
@@ -175,6 +184,8 @@ es mínimo (la métrica real se lee en cada bloque).
 | Ring buffer lock-free entre callbacks | Sin contención en el camino de audio |
 | Niveles con umbral y drenado por canal | Los callbacks nunca hacen trabajo lento |
 | Cadena conmutada por puntero (hilo de control) | Reconfiguración en vivo sin bloquear audio |
+| Reemplazo del módulo EQ solo (`SetLinkProcessor`) | Ajuste fino sin reconstruir la cadena entera ni perder el estado de reverb/delay |
+| Bandas del EQ en el estado (`eqBands`) | La UI y el móvil ven la configuración real, no solo el preset |
 | Análisis sin FFT (bandas con biquads) | O(n), sin dependencia extra y sin asignación en el callback |
 | Análisis en hilo dedicado + canal acotado | Las sugerencias y los `String` no tocan el camino de audio |
 | `DspCommand` sin `Debug` | Evita `unwrap`/`expect` y simplifica el patrón |
@@ -189,4 +200,7 @@ es mínimo (la métrica real se lee en cada bloque).
   generación de presets a medida queda para una fase posterior.
 - El móvil **solo monitorea** el análisis y las sugerencias (el bloque 5,
   control desde el móvil con autenticación mutua, quedó fuera de la Fase 2).
+- Los ajustes finos del EQ **no se persisten**: se pierden al cambiar de preset
+  o reiniciar el motor (la persistencia y los perfiles por dispositivo están
+  planificados en la Fase 3).
 - Sin persistencia de configuración ni autodetección de la IP del escritorio.

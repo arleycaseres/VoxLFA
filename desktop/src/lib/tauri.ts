@@ -116,6 +116,13 @@ export function setLinkBypass(link: string, bypass: boolean): Promise<void> {
     : mock.setLinkBypass(link, bypass);
 }
 
+/** Ajusta la ganancia de una banda del EQ del preset activo en vivo. */
+export function setEqBand(bandIndex: number, gainDb: number): Promise<void> {
+  return inTauri()
+    ? invoke<void>("set_eq_band", { bandIndex, gainDb })
+    : mock.setEqBand(bandIndex, gainDb);
+}
+
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */
 export function getAnalysis(): Promise<AnalysisSample | null> {
   return inTauri()

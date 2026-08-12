@@ -63,6 +63,21 @@ export interface PresetInfo {
   description: string;
 }
 
+/** Banda de un ecualizador paramétrico. */
+export interface EqBand {
+  /** Tipo de la banda (shelving o pico). */
+  kind: EqBandKind;
+  /** Frecuencia central (Hz). */
+  freqHz: number;
+  /** Ganancia en dB (negativo = corte). */
+  gainDb: number;
+  /** Factor de calidad Q (solo relevante para bandas de pico). */
+  q: number;
+}
+
+/** Tipo de banda del ecualizador. */
+export type EqBandKind = "lowShelf" | "peaking" | "highShelf";
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   /** Nombre corto del módulo (identificador para el bypass). */
@@ -71,6 +86,8 @@ export interface DspLinkState {
   enabled: boolean;
   /** `true` si está en bypass (se omite en tiempo real). */
   bypass: boolean;
+  /** Bandas actuales del EQ si este módulo es el ecualizador; si no, `null`. */
+  eqBands: EqBand[] | null;
 }
 
 /** Estado completo de la cadena DSP activa. */

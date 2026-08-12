@@ -13,6 +13,7 @@ import { StatusPill } from "./components/StatusPill";
 import { PairingBadge } from "./components/PairingBadge";
 import { PresetCard } from "./components/PresetCard";
 import { DspChain } from "./components/DspChain";
+import { EqPanel } from "./components/EqPanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
 import { formatLatency, formatSampleRate } from "./lib/format";
 import "./styles/fonts.css";
@@ -105,6 +106,13 @@ export default function App() {
             dsp={engine.dsp}
             onGlobalBypass={(bypass) => void engine.setGlobalBypass(bypass)}
             onLinkBypass={(link, bypass) => void engine.setLinkBypass(link, bypass)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Ecualizador</h2>
+          <EqPanel
+            dsp={engine.dsp}
+            running={running}
+            onSetEqBand={(index, gainDb) => void engine.setEqBand(index, gainDb)}
           />
 
           {engine.error && <p className="controls__error">{engine.error}</p>}
@@ -206,7 +214,7 @@ export default function App() {
           Salida: <strong>{engine.status?.outputDevice ?? "—"}</strong>
         </span>
         <span className="app__footer-item app__footer-item--mono">
-          v0.2.0 · Fase 2
+          v0.3.0 · EQ por banda
         </span>
       </footer>
     </div>

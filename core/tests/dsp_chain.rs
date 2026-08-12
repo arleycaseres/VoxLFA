@@ -101,3 +101,81 @@ fn dsp_state_serializes_as_expected_by_ui_and_mobile() {
     assert!(json.contains("\"name\":\"eq\""));
     assert!(json.contains("\"bypass\":false"));
 }
+
+#[test]
+fn eq_link_exposes_bands_from_the_preset() {
+    let chain = ChainProcessor::new(PresetId::VozLimpia, 48_000, 256);
+    let state = chain.state();
+    let eq = state
+        .links
+        .iter()
+        .find(|link| link.name == "eq")
+        .expect("preset vozLimpia incluye eq");
+    let bands = eq.eq_bands.as_ref().expect("el eslabón eq lleva bandas");
+    assert_eq!(bands.len(), 3);
+
+    // El preset Dry no tiene EQ: sus eslabones llevan `eq_bands` a `None`.
+    let dry = ChainProcessor::new(PresetId::Dry, 48_000, 256);
+    assert!(dry.state().links.is_empty());
+}
+
+#[test]
+fn set_eq_band_rebuilds_the_eq_and_emits_new_state() {
+    let (cmd_tx, cmd_rx) = mpsc::channel::<DspCommand>();
+    let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
+    let handle = DspHandle::new(cmd_tx, event_tx, PresetId::Warm, 48_000, 256);
+
+    handle.set_eq_band(0, 6.0).unwrap();
+
+    // El hilo de audio recibe el EQ nuevo ya construido con la banda ajustada.
+    match cmd_rx.recv().unwrap() {
+        DspCommand::SetLinkProcessor {
+            name,
+            processor,
+            eq_bands,
+        } => {
+            assert_eq!(name, "eq");
+            let bands = eq_bands.expect("lleva bandas");
+            assert_eq!(bands[0].gain_db, 6.0);
+            assert_eq!(processor.name(), "eq");
+        }
+        _ => panic!("esperaba SetLinkProcessor"),
+    }
+
+    // Se emite un evento `dsp` con el estado actualizado.
+    match event_rx.recv().unwrap() {
+        EngineEvent::Dsp(state) => {
+            let eq = state
+                .links
+                .iter()
+                .find(|link| link.name == "eq")
+                .expect("hay eslabón eq");
+            assert_eq!(
+                eq.eq_bands.as_ref().unwrap()[0].gain_db,
+                6.0,
+                "el espejo refleja la banda ajustada"
+            );
+        }
+        other => panic!("esperaba Dsp, obtuve {other:?}"),
+    }
+}
+
+#[test]
+fn set_eq_band_rejects_missing_eq_or_bad_index() {
+    let (cmd_tx, cmd_rx) = mpsc::channel::<DspCommand>();
+    let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>();
+
+    // Preset Dry: no hay módulo EQ.
+    let dry = DspHandle::new(cmd_tx, event_tx, PresetId::Dry, 48_000, 256);
+    assert!(dry.set_eq_band(0, 2.0).is_err());
+
+    // Índice fuera de rango en un preset con EQ.
+    let (cmd_tx2, _cmd_rx2) = mpsc::channel::<DspCommand>();
+    let (event_tx2, _event_rx2) = mpsc::channel::<EngineEvent>();
+    let warm = DspHandle::new(cmd_tx2, event_tx2, PresetId::Warm, 48_000, 256);
+    assert!(warm.set_eq_band(99, 2.0).is_err());
+
+    drop(cmd_rx);
+    let _ = dry;
+    let _ = warm;
+}

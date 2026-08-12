@@ -276,6 +276,13 @@ impl AudioEngine {
                             DspCommand::SetLinkBypass { name, bypass } => {
                                 chain.set_link_bypass(&name, bypass);
                             }
+                            DspCommand::SetLinkProcessor {
+                                name,
+                                processor,
+                                eq_bands,
+                            } => {
+                                chain.set_link_processor(&name, processor, eq_bands);
+                            }
                         }
                     }
 

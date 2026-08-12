@@ -13,6 +13,7 @@ import type {
   EngineEvent,
   EngineState,
   EngineStatus,
+  EqBand,
   LevelSample,
   PresetId,
   PresetInfo,
@@ -73,6 +74,25 @@ const PRESET_LINKS: Record<PresetId, string[]> = {
   vozLimpia: ["highpass", "boomsuppressor", "eq", "deesser", "compressor", "limiter"],
   radio: ["highpass", "notch", "eq", "saturator", "compressor", "limiter"],
   warm: ["highpass", "boomsuppressor", "eq", "compressor", "reverb", "limiter"],
+};
+
+/** Bandas del EQ por preset (espejo de los presets del core). */
+const PRESET_EQ: Record<PresetId, EqBand[]> = {
+  dry: [],
+  vozLimpia: [
+    { kind: "lowShelf", freqHz: 200, gainDb: -2, q: 0.8 },
+    { kind: "peaking", freqHz: 3000, gainDb: 2, q: 1.5 },
+    { kind: "highShelf", freqHz: 8000, gainDb: 1.5, q: 0.8 },
+  ],
+  radio: [
+    { kind: "peaking", freqHz: 1000, gainDb: 6, q: 1.2 },
+    { kind: "highShelf", freqHz: 3500, gainDb: -18, q: 0.8 },
+  ],
+  warm: [
+    { kind: "lowShelf", freqHz: 120, gainDb: 3, q: 0.8 },
+    { kind: "peaking", freqHz: 2500, gainDb: 1.5, q: 1.5 },
+    { kind: "highShelf", freqHz: 7000, gainDb: -2, q: 0.8 },
+  ],
 };
 
 /** Cada cuánto se emite una muestra de nivel (ms), igual que el core. */
@@ -153,6 +173,7 @@ function buildDspState(preset: PresetId): DspState {
     name,
     enabled: true,
     bypass: false,
+    eqBands: name === "eq" ? PRESET_EQ[preset] : null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -441,6 +462,24 @@ export function setLinkBypass(link: string, bypass: boolean): Promise<void> {
     ...dspState,
     links: dspState.links.map((item) =>
       item.name === link ? { ...item, bypass } : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setEqBand(bandIndex: number, gainDb: number): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "eq" && item.eqBands
+        ? {
+            ...item,
+            eqBands: item.eqBands.map((band, index) =>
+              index === bandIndex ? { ...band, gainDb } : band,
+            ),
+          }
+        : item,
     ),
   };
   syncDsp();

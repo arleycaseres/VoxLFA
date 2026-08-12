@@ -27,6 +27,7 @@ import {
   getSessionSummary,
   listDevices,
   onEngineEvent,
+  setEqBand,
   setGlobalBypass,
   setLinkBypass,
   startEngine,
@@ -74,6 +75,8 @@ export interface EngineController {
   setGlobalBypass: (bypass: boolean) => Promise<void>;
   /** Cambia el bypass de un módulo por su nombre. */
   setLinkBypass: (link: string, bypass: boolean) => Promise<void>;
+  /** Ajusta la ganancia de una banda del EQ del preset activo en vivo. */
+  setEqBand: (bandIndex: number, gainDb: number) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
@@ -153,6 +156,14 @@ export function useEngine(): EngineController {
   const setLinkBypassAction = useCallback(async (link: string, bypass: boolean) => {
     try {
       await setLinkBypass(link, bypass);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setEqBandAction = useCallback(async (bandIndex: number, gainDb: number) => {
+    try {
+      await setEqBand(bandIndex, gainDb);
     } catch (err) {
       setError(String(err));
     }
@@ -258,6 +269,7 @@ export function useEngine(): EngineController {
     applyPreset: applyPresetAction,
     setGlobalBypass: setGlobalBypassAction,
     setLinkBypass: setLinkBypassAction,
+    setEqBand: setEqBandAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
   };
