@@ -8,6 +8,7 @@ de esta página son obligatorias y se verifican en cada revisión.
 | Amenaza | Impacto | Mitigación |
 | --- | --- | --- |
 | Conexión anónima al WebSocket | Control/sabotaje remoto | Código de emparejamiento obligatorio |
+| Fuerza bruta del código en la red local | Acceso no autorizado | Rotación tras `MAX_FAILED_ATTEMPTS` fallos consecutivos |
 | Fuga del código de emparejamiento | Acceso no autorizado | No se loguea; solo se muestra en la UI |
 | Entrada malformada por la red | Crash/DoS | Validación de tipos y longitud |
 | Ejecución de script en la cabina | Robo de datos del sistema | CSP estricto en Tauri |
@@ -19,12 +20,19 @@ de esta página son obligatorias y se verifican en cada revisión.
   la URL (`?token=...`). El handshake lo valida; si no, responde `401` y cierra.
   La validación ocurre antes de aceptar la conexión, por lo que un cliente sin
   token **no** puede consumir eventos.
+- **Rotación por fallos**: el código rota automáticamente tras
+  `MAX_FAILED_ATTEMPTS` (3) handshakes fallidos consecutivos (`PairingState`).
+  El nuevo código se publica por el evento Tauri `pairing-event` y la cabina lo
+  muestra al instante, así un ataque de fuerza bruta en la red local obliga al
+  atacante a volver a empezar y queda a la vista del operador. Un acierto
+  reinicia el contador.
 - **El token equivale a mando remoto**: el cliente autenticado puede detener el
   motor y reconfigurar la cadena (preset, bypasses y EQ). No hay autenticación
   mutua por dispositivo; proteger el código y no compartirlo fuera de la red de
   confianza.
-- **No loguear códigos**: el código generado vive en `AppState` y nunca se
-  escribe en logs de producción ni en eventos.
+- **No loguear códigos**: el código generado vive en `PairingState` y nunca se
+  escribe en logs de producción ni en eventos. Las rotaciones se difunden solo
+  por el canal interno `pairing-event` hacia la UI.
 - **Longitud**: el token se compara por igualdad exacta con el código generado
   (6 caracteres); la comparación no filtra el valor. Rechaza cualquier entrada
   fuera de ese dominio.
@@ -32,7 +40,9 @@ de esta página son obligatorias y se verifican en cada revisión.
   (0.0.0.0). No se publica a Internet: documentar al usuario que la app debe
   usarse solo en redes de confianza.
 - **Tasas de reintento**: el móvil aplica retroceso exponencial acotado (máx.
-  8 s, máx. 5 reintentos) para no saturar el escritorio con reintentos.
+  8 s, máx. 5 reintentos) para no saturar el escritorio con reintentos. Ojo: un
+  reintento constante también rota el código (ver arriba), así que el móvil debe
+  pedir el código nuevo al usuario si lo ha perdido.
 
 ### Entradas de control (comandos del móvil)
 
@@ -89,7 +99,6 @@ La verificación final del proyecto ejecuta, además de tests:
 
 ## Pendientes (fases futuras)
 
-- Rotación del código de emparejamiento tras N intentos fallidos.
 - Cifrado en tránsito si el WebSocket sale de la red local (wss + TLS).
 - Autenticación mutua del móvil (clave por dispositivo): se evaluó y se
   descartó por ahora; el código de emparejamiento sigue siendo el único factor

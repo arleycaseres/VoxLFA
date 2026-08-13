@@ -29,6 +29,7 @@ import {
   getSessionSummary,
   listDevices,
   onEngineEvent,
+  onPairingEvent,
   setEqBand,
   setGlobalBypass,
   setLinkBypass,
@@ -228,6 +229,12 @@ export function useEngine(): EngineController {
 
     const unsubscribe = onEngineEvent(applyEvent).catch(() => undefined);
 
+    // Rotación del código de emparejamiento (por fallos consecutivos en el
+    // handshake del móvil): refresca el código mostrado en la cabina.
+    const unsubscribePairing = onPairingEvent((code) => {
+      setPairing((previous) => (previous ? { ...previous, code } : previous));
+    }).catch(() => undefined);
+
     (async () => {
       const [status, level, pairing, presets, config, dsp, analysis] =
         await Promise.allSettled([
@@ -256,6 +263,7 @@ export function useEngine(): EngineController {
     return () => {
       cancelled = true;
       unsubscribe.then((fn) => fn?.());
+      unsubscribePairing.then((fn) => fn?.());
     };
   }, [refreshDevices]);
 

@@ -89,6 +89,21 @@ análisis y controla el motor de forma remota (stop, preset, bypass y EQ).
 > autenticación mutua por dispositivo por decisión de producto; ver
 > `docs/seguridad.md`).
 
+## Fase 2.6 — Seguridad del emparejamiento ✅
+
+Objetivo: mitigar la fuerza bruta del código en la red local.
+
+- [x] `PairingState` en el backend: código vigente + contador de fallos;
+      autenticación atómica por handshake (`authenticate`), sin bloquear red.
+- [x] Rotación automática tras 3 handshakes fallidos consecutivos (el acierto
+      reinicia el contador); el nuevo código se publica por el evento Tauri
+      `pairing-event` y la cabina lo refresca al instante.
+- [x] El WebSocket comparte el `PairingState` y ejecuta la rotación en el propio
+      handshake (401) sin desbloquear la conexión aceptada.
+- [x] Tests: 7 unitarios de `PairingState` + 1 de integración de rotación
+      (`repeated_failures_rotate_the_pairing_code`).
+- [x] Documentación de seguridad actualizada (rotación como mitigación).
+
 ## Fase 3 — Persistencia y perfiles por dispositivo ✅
 
 Objetivo: que la cabina recuerde la configuración del usuario y la reaplique al

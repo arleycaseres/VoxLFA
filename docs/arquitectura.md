@@ -244,6 +244,7 @@ es mínimo (la métrica real se lee en cada bloque).
 | EQ fino en memoria + volcado al detener | No escribe `config.json` en cada paso del slider |
 | Config tolerante a fallos (best-effort) | Un archivo corrupto nunca impide arrancar la sesión |
 | WebSocket con token en la URL | Autenticación simple y sin estado |
+| Rotación del código tras 3 fallos consecutivos | Mitiga fuerza bruta local; el nuevo código se difunde por `pairing-event` |
 | WS bidireccional: comandos móvil → motor | Control remoto con el mismo gestor y validación de entrada |
 | Mutex solo durante la ejecución del comando | Nunca se bloquea el `await` de red sosteniendo el lock |
 | `start` reservado a la cabina | Arrancar exige el callback de eventos de la ventana; evita desincronizar la UI |

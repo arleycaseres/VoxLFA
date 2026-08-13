@@ -1,5 +1,6 @@
 //! Test de integración del servidor WebSocket: autenticación por token,
-//! difusión de eventos del motor y enrutado de comandos de control del móvil.
+//! rotación del código, difusión de eventos del motor y enrutado de comandos
+//! de control del móvil.
 
 use std::sync::{Arc, Mutex};
 
@@ -8,6 +9,7 @@ use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use voxlfa_core::protocol::{EngineEvent, LevelSample};
 use voxlfa_desktop_lib::engine::EngineManager;
+use voxlfa_desktop_lib::pairing::{PairingState, MAX_FAILED_ATTEMPTS};
 use voxlfa_desktop_lib::ws::run_ws_server;
 
 /// Código de emparejamiento usado en las pruebas.
@@ -22,8 +24,10 @@ async fn start_server() -> (u16, broadcast::Sender<String>) {
 
     let (events, _) = broadcast::channel(64);
     let sender = events.clone();
+    let (pairing_events, _) = broadcast::channel(16);
+    let pairing = Arc::new(Mutex::new(PairingState::with_code(TEST_CODE.to_string())));
     let engine = Arc::new(Mutex::new(EngineManager::new(events.clone())));
-    tokio::spawn(run_ws_server(events, TEST_CODE.to_string(), engine, port));
+    tokio::spawn(run_ws_server(events, pairing, pairing_events, engine, port));
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     (port, sender)
 }
@@ -190,4 +194,27 @@ async fn stop_command_keeps_connection_alive() {
     }
 
     let _ = ws.close(None).await;
+}
+
+#[tokio::test]
+async fn repeated_failures_rotate_the_pairing_code() {
+    // El `MAX_FAILED_ATTEMPTS` en vivo se comparte con el servidor: usar un
+    // umbral propio aquí cambiaría el del crate, así que usamos el real y
+    // lanzamos exactamente `MAX_FAILED_ATTEMPTS` handshakes fallidos.
+    let (port, _sender) = start_server().await;
+
+    for _ in 0..MAX_FAILED_ATTEMPTS {
+        let url = format!("ws://127.0.0.1:{port}/?token=WRONG");
+        let result = tokio_tungstenite::connect_async(&url).await;
+        assert!(result.is_err(), "cada token incorrecto debe rechazarse");
+    }
+
+    // Con el código original ya rechazado, el nuevo handshake con `TEST_CODE`
+    // también debe fallar: el código vigente rotó durante el último intento.
+    let url = format!("ws://127.0.0.1:{port}/?token={TEST_CODE}");
+    let result = tokio_tungstenite::connect_async(&url).await;
+    assert!(
+        result.is_err(),
+        "tras superar el máximo de fallos, el código original debe haber rotado"
+    );
 }

@@ -30,6 +30,7 @@ use tokio_tungstenite::WebSocketStream;
 use voxlfa_core::protocol::{ControlCommand, EngineEvent};
 
 use crate::engine::EngineManager;
+use crate::pairing::{AuthResult, PairingState};
 
 /// Espera entre reintentos al aceptar conexiones tras un error.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
@@ -58,11 +59,17 @@ pub enum WsError {
 
 /// Arranca el servidor WebSocket en el puerto indicado (tarea asíncrona).
 ///
+/// `pairing` es el estado compartido del código de emparejamiento: cada
+/// handshake lo consulta y, si se superan `MAX_FAILED_ATTEMPTS` intentos
+/// fallidos consecutivos, rota el código y publica el nuevo en
+/// `pairing_events` para que la cabina lo muestre.
+///
 /// Corre para siempre; si no puede abrir el puerto, lo avisa por consola y
 /// termina (la app sigue funcionando, solo se pierde el control remoto).
 pub async fn run_ws_server(
     events: broadcast::Sender<String>,
-    pairing_code: String,
+    pairing: Arc<Mutex<PairingState>>,
+    pairing_events: broadcast::Sender<String>,
     engine: Arc<Mutex<EngineManager>>,
     port: u16,
 ) {
@@ -79,10 +86,13 @@ pub async fn run_ws_server(
         match listener.accept().await {
             Ok((stream, peer)) => {
                 let events = events.clone();
-                let code = pairing_code.clone();
+                let pairing = pairing.clone();
+                let pairing_events = pairing_events.clone();
                 let engine = engine.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, events, code, engine).await {
+                    if let Err(err) =
+                        handle_connection(stream, events, pairing, pairing_events, engine).await
+                    {
                         eprintln!("[voxlfa] ws {peer}: {err}");
                     }
                 });
@@ -107,35 +117,47 @@ type ErrorResponse = http::Response<Option<String>>;
 async fn handle_connection(
     stream: TcpStream,
     events: broadcast::Sender<String>,
-    pairing_code: String,
+    pairing: Arc<Mutex<PairingState>>,
+    pairing_events: broadcast::Sender<String>,
     engine: Arc<Mutex<EngineManager>>,
 ) -> Result<(), WsError> {
-    // 1) Autenticación por token en la URL (`?token=<código>`).
-    let mut authorized = false;
-    let ws = tokio_tungstenite::accept_hdr_async(
+    // 1) Autenticación por token en la URL (`?token=<código>`). Los fallos
+    //    consecutivos rotan el código (ver `PairingState`).
+    let mut rotated_code: Option<String> = None;
+    let accept_result = tokio_tungstenite::accept_hdr_async(
         stream,
         |request: &http::Request<()>, response| -> Result<_, ErrorResponse> {
-            authorized =
-                token_from_query(request.uri().query()).as_deref() == Some(pairing_code.as_str());
-
-            if authorized {
-                // Proceder con el handshake estándar (HTTP 101).
-                Ok(response)
-            } else {
-                // Rechazar: tungstenite escribe el 401 y cierra la conexión.
-                let mut error_response = http::Response::new(None);
-                *error_response.status_mut() = http::StatusCode::UNAUTHORIZED;
-                Err(error_response)
+            let token = token_from_query(request.uri().query());
+            let mut guard = lock_pairing(&pairing);
+            match guard.authenticate(token.as_deref()) {
+                AuthResult::Accepted => {
+                    // Proceder con el handshake estándar (HTTP 101).
+                    Ok(response)
+                }
+                AuthResult::Rejected => {
+                    // Rechazar: tungstenite escribe el 401 y cierra la conexión.
+                    Err(unauthorized_response())
+                }
+                AuthResult::RejectedAndRotated => {
+                    rotated_code = Some(guard.code().to_string());
+                    Err(unauthorized_response())
+                }
             }
         },
     )
-    .await?;
+    .await;
 
-    // (Cuando `authorized` es falso, accept_hdr_async ya devuelve Err y
-    // terminamos arriba; esta guardia es solo defensiva.)
-    if !authorized {
-        return Ok(());
-    }
+    // Una rotación solo ocurre con un handshake rechazado: publicarla para que
+    // la cabina actualice el código mostrado al usuario.
+    let ws = match accept_result {
+        Ok(ws) => ws,
+        Err(err) => {
+            if let Some(code) = rotated_code.take() {
+                let _ = pairing_events.send(code);
+            }
+            return Err(WsError::Handshake(err));
+        }
+    };
 
     // 2) Bucle de difusión + recepción de comandos de control.
     let (mut sink, mut incoming) = ws.split();
@@ -271,6 +293,22 @@ async fn send_warning(
     sink.send(Message::Text(json.into()))
         .await
         .map_err(|err| WsError::Io(err.to_string()))
+}
+
+/// Bloquea el estado de emparejamiento recuperando el guard de un mutex
+/// envenenado (un panic previo no bloquea la autenticación para siempre).
+fn lock_pairing(pairing: &Arc<Mutex<PairingState>>) -> std::sync::MutexGuard<'_, PairingState> {
+    match pairing.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+/// Respuesta HTTP 401 para un handshake rechazado (dictado por tungstenite).
+fn unauthorized_response() -> ErrorResponse {
+    let mut response = http::Response::new(None);
+    *response.status_mut() = http::StatusCode::UNAUTHORIZED;
+    response
 }
 
 /// Extrae el token de emparejamiento del query de una URL WebSocket.

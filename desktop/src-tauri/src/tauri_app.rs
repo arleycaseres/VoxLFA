@@ -16,7 +16,7 @@ use voxlfa_core::protocol::{
 };
 
 use crate::engine::EngineManager;
-use crate::pairing::generate_pairing_code;
+use crate::pairing::{PairingState, DEFAULT_CODE_LENGTH};
 use crate::ws::run_ws_server;
 
 /// Puerto del WebSocket de monitoreo remoto (app móvil).
@@ -25,8 +25,11 @@ pub const WS_PORT: u16 = 4356;
 /// Capacidad del canal broadcast de eventos serializados.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 
-/// Longitud del código de emparejamiento mostrado al usuario.
-const PAIRING_CODE_LENGTH: usize = 6;
+/// Capacidad del canal broadcast de códigos de emparejamiento rotados.
+const PAIRING_EVENT_CHANNEL_CAPACITY: usize = 8;
+
+/// Evento que la cabina escucha para refrescar el código de emparejamiento.
+pub const PAIRING_EVENT_NAME: &str = "pairing-event";
 
 /// Estado global de la aplicación, gestionado por Tauri.
 pub struct AppState {
@@ -37,17 +40,22 @@ pub struct AppState {
     pub engine: Arc<Mutex<EngineManager>>,
     /// Emisor de eventos serializados (JSON) hacia el WebSocket.
     pub events: broadcast::Sender<String>,
-    /// Código de emparejamiento para la app móvil (nunca se loguea).
-    pub pairing_code: Arc<String>,
+    /// Estado del código de emparejamiento (se rota tras fallos; el WS lo
+    /// comparte con la cabina).
+    pub pairing: Arc<Mutex<PairingState>>,
+    /// Emisor del código nuevo cuando el emparejamiento rota (solo cabina).
+    pub pairing_events: broadcast::Sender<String>,
 }
 
 impl AppState {
     fn new() -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+        let (pairing_events, _) = broadcast::channel(PAIRING_EVENT_CHANNEL_CAPACITY);
         Self {
             engine: Arc::new(Mutex::new(EngineManager::new(events.clone()))),
             events,
-            pairing_code: Arc::new(generate_pairing_code(PAIRING_CODE_LENGTH)),
+            pairing: Arc::new(Mutex::new(PairingState::new(DEFAULT_CODE_LENGTH))),
+            pairing_events,
         }
     }
 }
@@ -229,8 +237,14 @@ fn get_config(state: State<AppState>) -> Result<AppConfig, String> {
 #[tauri::command]
 fn get_pairing_info(state: State<AppState>) -> Result<PairingInfo, String> {
     let lan_address = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
+    let code = state
+        .pairing
+        .lock()
+        .map_err(|err| err.to_string())?
+        .code()
+        .to_string();
     Ok(PairingInfo {
-        code: state.pairing_code.to_string(),
+        code,
         port: WS_PORT,
         lan_address,
     })
@@ -262,9 +276,26 @@ pub fn run() {
             // Servidor WebSocket para el monitoreo y control remoto desde el móvil.
             let state = app.state::<AppState>();
             let events = state.events.clone();
-            let code = state.pairing_code.to_string();
+            let pairing = state.pairing.clone();
             let engine = state.engine.clone();
-            tauri::async_runtime::spawn(run_ws_server(events, code, engine, WS_PORT));
+            let pairing_events = state.pairing_events.clone();
+            tauri::async_runtime::spawn(run_ws_server(
+                events,
+                pairing,
+                state.pairing_events.clone(),
+                engine,
+                WS_PORT,
+            ));
+
+            // Reenviar las rotaciones del código a la cabina para que actualice
+            // el badge de emparejamiento en vivo.
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut rx = pairing_events.subscribe();
+                while let Ok(code) = rx.recv().await {
+                    let _ = app_handle.emit(PAIRING_EVENT_NAME, code);
+                }
+            });
             Ok(())
         });
 

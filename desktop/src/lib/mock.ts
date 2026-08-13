@@ -25,7 +25,7 @@ import type {
 import type { PairingInfo } from "./tauri";
 
 /** Datos de emparejamiento simulados. */
-const FAKE_PAIRING: PairingInfo = {
+let FAKE_PAIRING: PairingInfo = {
   code: "VX7K9Q",
   port: 4356,
   lanAddress: "192.168.1.24",
@@ -519,6 +519,31 @@ export function applySuggestion(suggestionId: number): Promise<void> {
 
 export function getPairingInfo(): Promise<PairingInfo> {
   return Promise.resolve(FAKE_PAIRING);
+}
+
+type PairingListener = (code: string) => void;
+
+const pairingListeners = new Set<PairingListener>();
+
+export function onPairingEvent(handler: PairingListener): () => void {
+  pairingListeners.add(handler);
+  return () => {
+    pairingListeners.delete(handler);
+  };
+}
+
+/**
+ * Simula la rotación del código por intentos fallidos (solo para desarrollo
+ * sin Tauri): genera un código nuevo y notifica a los suscriptores.
+ */
+export function rotatePairingCode(): void {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i += 1) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  FAKE_PAIRING = { ...FAKE_PAIRING, code };
+  for (const listener of pairingListeners) listener(code);
 }
 
 export function onEngineEvent(handler: Listener): () => void {

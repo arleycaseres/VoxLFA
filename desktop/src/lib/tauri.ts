@@ -161,3 +161,16 @@ export async function onEngineEvent(
     ? listen<EngineEvent>("engine-event", (event) => handler(event.payload))
     : (mock.onEngineEvent(handler) as UnlistenFn);
 }
+
+/**
+ * Se suscribe a las rotaciones del código de emparejamiento: cuando el backend
+ * rota el código por intentos fallidos, `handler` recibe el código nuevo.
+ * Devuelve una función para cancelar la suscripción.
+ */
+export async function onPairingEvent(
+  handler: (code: string) => void,
+): Promise<UnlistenFn> {
+  return inTauri()
+    ? listen<string>("pairing-event", (event) => handler(event.payload))
+    : (mock.onPairingEvent(handler) as UnlistenFn);
+}
