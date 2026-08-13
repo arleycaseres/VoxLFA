@@ -104,6 +104,22 @@ Objetivo: mitigar la fuerza bruta del código en la red local.
       (`repeated_failures_rotate_the_pairing_code`).
 - [x] Documentación de seguridad actualizada (rotación como mitigación).
 
+## Fase 2.7 — Autodetección del escritorio (mDNS + QR) ✅
+
+Objetivo: que el móvil descubra el escritorio sin teclear la IP.
+
+- [x] El escritorio se anuncia por mDNS como `_voxlfa._tcp.local.` (`mdns-sd`)
+      con la IP LAN y el puerto del WebSocket; los TXT solo llevan metadatos no
+      sensibles (nunca el token). Test de integración registra y resuelve el
+      servicio (`advertise_then_browse_finds_the_service`).
+- [x] La cabina muestra un **QR** que codifica `ws://<ip>:<puerto>/?token=<código>`
+      (se regenera al rotar el código).
+- [x] La app móvil escanea el QR (`expo-camera`, compatible con Expo Go),
+      rellena IP/puerto/código y conecta automáticamente.
+- [x] Se descarta el cliente mDNS nativo en el móvil: rompe Expo Go y exigiría
+      un build con dev tools; el QR resuelve la autodetección sin compilar.
+- [x] Documentación actualizada (protocolo, seguridad, arquitectura).
+
 ## Fase 3 — Persistencia y perfiles por dispositivo ✅
 
 Objetivo: que la cabina recuerde la configuración del usuario y la reaplique al
@@ -129,5 +145,6 @@ volver a conectar el mismo dispositivo.
 ## Fase 3+ — Pulido y distribución
 
 - [ ] Paquetes de instalación (deb/AppImage/msi, APK).
-- [ ] Autodetección de escritorios en la red para el móvil (mDNS).
+- [ ] Navegación mDNS nativa desde el móvil (opcional): el escritorio ya se
+      anuncia; solo faltaría un cliente DNS-SD nativo (requiere dev build).
 - [ ] Telemetría opcional y anónima (con consentimiento y CSP acotada).

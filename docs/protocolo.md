@@ -279,7 +279,15 @@ Los argumentos en JS usan camelCase (Tauri v2 los convierte desde snake_case).
 
 - URL: `ws://<ip>:4356/?token=<código>`.
 - Autenticación: el código de emparejamiento va en el query string. Sin token
-  válido, el servidor responde `401` y cierra la conexión.
+  válido, el servidor responde `401` y cierra la conexión. Tras
+  `MAX_FAILED_ATTEMPTS` (3) handshakes fallidos consecutivos el código **rota**
+  automáticamente y la cabina recibe el nuevo por el evento `pairing-event`
+  (la app móvil debe pedir el código actualizado o volver a escanear el QR).
+- Descubrimiento: el escritorio se anuncia por **mDNS** como
+  `_voxlfa._tcp.local.` (TXT solo con metadatos: `name`, `ver`; nunca el
+  token). La app móvil conecta rellenando IP/puerto/código a mano o
+  **escanenado el QR** que muestra la cabina, que codifica exactamente esta
+  URL (`ws://<ip>:<puerto>/?token=<código>`).
 - Tráfico:
   - **Server → client**: eventos del motor (`status`, `level`, `dsp`, …).
   - **Client → server**: comandos `stop`, `setPreset`, `setGlobalBypass`,

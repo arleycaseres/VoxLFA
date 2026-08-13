@@ -245,6 +245,8 @@ es mínimo (la métrica real se lee en cada bloque).
 | Config tolerante a fallos (best-effort) | Un archivo corrupto nunca impide arrancar la sesión |
 | WebSocket con token en la URL | Autenticación simple y sin estado |
 | Rotación del código tras 3 fallos consecutivos | Mitiga fuerza bruta local; el nuevo código se difunde por `pairing-event` |
+| Anuncio mDNS (`_voxlfa._tcp.local.`) con TXT sin secretos | El escritorio es descubrible sin filtrar el token de baja entropía |
+| QR con la URL completa para el móvil | Rellena IP/puerto/token sin teclear y sin módulo nativo (Expo Go) |
 | WS bidireccional: comandos móvil → motor | Control remoto con el mismo gestor y validación de entrada |
 | Mutex solo durante la ejecución del comando | Nunca se bloquea el `await` de red sosteniendo el lock |
 | `start` reservado a la cabina | Arrancar exige el callback de eventos de la ventana; evita desincronizar la UI |
@@ -263,4 +265,8 @@ es mínimo (la métrica real se lee en cada bloque).
 - El perfil se indexa por el **nombre del dispositivo de entrada**: si el
   sistema cambia el nombre (p. ej. al mover un USB de puerto), el perfil se
   pierde para ese dispositivo (no hay identificación por hardware).
-- Sin autodetección de la IP del escritorio para el móvil.
+- Sin navegación mDNS desde el móvil: el escritorio se anuncia como
+  `_voxlfa._tcp.local.`, pero la app móvil no usa un cliente mDNS nativo (rompe
+  Expo Go); en su lugar, la cabina muestra un **QR** que codifica la URL
+  `ws://<ip>:<puerto>/?token=<código>` y la app lo escanea (autodetección
+  práctica sin build nativo).

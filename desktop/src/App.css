@@ -932,6 +932,70 @@
   color: var(--color-text-dim);
 }
 
+.pairing__qr-button {
+  margin-top: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-cyan);
+  font-family: var(--font-display);
+  font-size: 0.54rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.pairing__qr-button:hover {
+  border-color: var(--color-cyan);
+}
+
+.pairing__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 6, 8, 0.72);
+}
+
+.pairing__modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1.4rem;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.pairing__qr {
+  width: 240px;
+  height: 240px;
+  border-radius: 6px;
+}
+
+.pairing__hint {
+  font-size: 0.72rem;
+  color: var(--color-text-dim);
+}
+
+.pairing__close {
+  padding: 0.35rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.pairing__close:hover {
+  border-color: var(--color-cyan);
+  color: var(--color-cyan);
+}
+
 /* ---------- Barra inferior ---------- */
 .app__footer {
   display: flex;

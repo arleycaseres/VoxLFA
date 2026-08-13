@@ -16,6 +16,7 @@ use voxlfa_core::protocol::{
 };
 
 use crate::engine::EngineManager;
+use crate::mdns::MdnsAdvertiser;
 use crate::pairing::{PairingState, DEFAULT_CODE_LENGTH};
 use crate::ws::run_ws_server;
 
@@ -45,17 +46,27 @@ pub struct AppState {
     pub pairing: Arc<Mutex<PairingState>>,
     /// Emisor del código nuevo cuando el emparejamiento rota (solo cabina).
     pub pairing_events: broadcast::Sender<String>,
+    /// Anuncio mDNS del escritorio (`_voxlfa._tcp.local.`) para que el móvil lo
+    /// descubra; `None` si no se pudo publicar.
+    pub mdns: Option<MdnsAdvertiser>,
 }
 
 impl AppState {
     fn new() -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         let (pairing_events, _) = broadcast::channel(PAIRING_EVENT_CHANNEL_CAPACITY);
+        // Autodetección: anunciar el escritorio por mDNS con la IP LAN actual.
+        // Si falla (red sin multicast, p. ej.) la app sigue funcionando; solo
+        // se pierde el descubrimiento automático del móvil.
+        let mdns = local_ip_address::local_ip()
+            .ok()
+            .and_then(|ip| MdnsAdvertiser::start(&[ip], WS_PORT).ok());
         Self {
             engine: Arc::new(Mutex::new(EngineManager::new(events.clone()))),
             events,
             pairing: Arc::new(Mutex::new(PairingState::new(DEFAULT_CODE_LENGTH))),
             pairing_events,
+            mdns,
         }
     }
 }

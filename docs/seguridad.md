@@ -44,6 +44,18 @@ de esta página son obligatorias y se verifican en cada revisión.
   reintento constante también rota el código (ver arriba), así que el móvil debe
   pedir el código nuevo al usuario si lo ha perdido.
 
+## mDNS y QR (emparejamiento)
+
+- El escritorio anuncia `_voxlfa._tcp.local.` por mDNS con **solo metadatos no
+  sensibles** en los TXT (`name`, `ver`).
+- El token **nunca** viaja por mDNS: es un secreto de baja entropía y un hash
+  suyo sería bruto-forzable sin conexión. El código llega al móvil únicamente
+  por el canal fuera de banda del **QR**, que codifica la URL completa
+  `ws://<ip>:<puerto>/?token=<código>` y se muestra en pantalla de la cabina
+  (misma confianza que mostrar el código en texto).
+- El móvil no usa un cliente mDNS nativo (rompería Expo Go); el QR es el método
+  de autodetección sin compilar.
+
 ### Entradas de control (comandos del móvil)
 
 Todo comando entrante se valida antes de ejecutarse:

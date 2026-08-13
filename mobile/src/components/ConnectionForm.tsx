@@ -12,6 +12,8 @@ import {
   View,
 } from "react-native";
 import type { ConnectionState } from "../hooks/useRemoteEngine";
+import type { PairingTarget } from "../lib/pairingUrl";
+import { QrScanner } from "./QrScanner";
 
 interface ConnectionFormProps {
   connState: ConnectionState;
@@ -33,6 +35,7 @@ export function ConnectionForm({ connState, onConnect, onDisconnect }: Connectio
   const [host, setHost] = useState("");
   const [port, setPort] = useState(DEFAULT_PORT);
   const [code, setCode] = useState("");
+  const [scanning, setScanning] = useState(false);
 
   const connected = connState === "connected";
 
@@ -44,6 +47,23 @@ export function ConnectionForm({ connState, onConnect, onDisconnect }: Connectio
       onConnect(host, portNumber, code);
     }
   };
+
+  const handleScanned = (target: PairingTarget) => {
+    setHost(target.host);
+    setPort(String(target.port));
+    setCode(target.code);
+    setScanning(false);
+    onConnect(target.host, target.port, target.code);
+  };
+
+  if (scanning) {
+    return (
+      <QrScanner
+        onScanned={handleScanned}
+        onCancel={() => setScanning(false)}
+      />
+    );
+  }
 
   return (
     <View style={styles.card}>
@@ -98,6 +118,16 @@ export function ConnectionForm({ connState, onConnect, onDisconnect }: Connectio
       >
         <Text style={styles.buttonText}>{BUTTON_LABEL[connState]}</Text>
       </TouchableOpacity>
+
+      {!connected && (
+        <TouchableOpacity
+          style={styles.buttonGhost}
+          onPress={() => setScanning(true)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.buttonText}>Escanear código QR</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -168,5 +198,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     letterSpacing: 1,
     textTransform: "uppercase",
+  },
+  buttonGhost: {
+    marginTop: 8,
+    borderColor: "#2a2e34",
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingVertical: 12,
+    alignItems: "center",
   },
 });
