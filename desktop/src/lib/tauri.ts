@@ -18,6 +18,7 @@ import type {
   PresetId,
   PresetInfo,
   SessionSummary,
+  SpectrumSample,
 } from "./types";
 
 /** `true` dentro de la ventana real de Tauri; `false` en un navegador plano. */
@@ -82,6 +83,13 @@ export function getLastLevel(): Promise<LevelSample | null> {
   return inTauri()
     ? invoke<LevelSample | null>("get_last_level")
     : mock.getLastLevel();
+}
+
+/** Lee el último espectro emitido (para el renderizado inicial de la UI). */
+export function getLastSpectrum(): Promise<SpectrumSample | null> {
+  return inTauri()
+    ? invoke<SpectrumSample | null>("get_last_spectrum")
+    : mock.getLastSpectrum();
 }
 
 /** Lista los presets de la cabina con sus metadatos. */

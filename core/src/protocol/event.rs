@@ -31,6 +31,13 @@ pub struct AudioDeviceInfo {
     pub is_default: bool,
 }
 
+/// Número fijo de bandas logarítmicas del espectro emitido por el motor.
+///
+/// El motor calcula una FFT sobre la entrada y reduce el resultado a estas
+/// bandas (20 Hz → Nyquist). Mantén el mismo valor en los consumidores
+/// (desktop y móvil); es parte del contrato de datos.
+pub const SPECTRUM_BIN_COUNT: usize = 32;
+
 /// Evento de alto nivel del motor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
@@ -43,6 +50,8 @@ pub enum EngineEvent {
     Status(EngineStatus),
     /// Muestra de nivel + latencia en tiempo real (frecuencia acotada).
     Level(LevelSample),
+    /// Espectro de la entrada en vivo (FFT reducida a bandas logarítmicas).
+    Spectrum(SpectrumSample),
     /// Listado de dispositivos de entrada/salida disponibles.
     Devices {
         /// Dispositivos de captura (micrófonos, interfaces).
@@ -94,5 +103,22 @@ pub struct LevelSample {
     /// Latencia actual captura→salida en milisegundos.
     pub latency_ms: f32,
     /// Tiempo monotónico (ms) de la captura; útil para gráficas.
+    pub captured_at_ms: u64,
+}
+
+/// Muestra del espectro de la entrada (FFT) emitida en vivo.
+///
+/// La FFT (ventana Hann, 50 % de solapamiento) se reduce a
+/// [`SPECTRUM_BIN_COUNT`] bandas logarítmicas entre ~20 Hz y el Nyquist de
+/// `sample_rate`; cada valor es el nivel pico de la banda en dBFS, suavizado
+/// con un envolvente ataque/release para estabilizar la visualización.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpectrumSample {
+    /// Nivel de cada banda logarítmica en dBFS (longitud fija).
+    pub bins_db: [f32; SPECTRUM_BIN_COUNT],
+    /// Frecuencia de muestreo (Hz) de la captura; define los bordes de banda.
+    pub sample_rate: u32,
+    /// Tiempo monotónico (ms) de la captura.
     pub captured_at_ms: u64,
 }

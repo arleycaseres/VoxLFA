@@ -51,6 +51,22 @@ export interface LevelSample {
   capturedAtMs: number;
 }
 
+/** Número fijo de bandas logarítmicas del espectro emitido por el motor. */
+export const SPECTRUM_BIN_COUNT = 32;
+
+/** Muestra del espectro de la entrada (FFT) emitida en vivo. */
+export interface SpectrumSample {
+  /**
+   * Nivel de cada banda logarítmica en dBFS (longitud fija
+   * `SPECTRUM_BIN_COUNT`, entre ~20 Hz y el Nyquist de `sampleRate`).
+   */
+  binsDb: number[];
+  /** Frecuencia de muestreo (Hz) de la captura; define los bordes de banda. */
+  sampleRate: number;
+  /** Tiempo monotónico (ms) de la captura. */
+  capturedAtMs: number;
+}
+
 /** Identificador de un preset de la cabina. */
 export type PresetId = "dry" | "vozLimpia" | "radio" | "warm";
 
@@ -212,12 +228,13 @@ export interface SessionSummary {
 
 /**
  * Evento emitido por el motor (tag `type`, campos en camelCase).
- * Los eventos `status`, `level`, `dsp` y `analysis` incluyen además todos los
- * campos de su respectiva estructura (serde los aplana).
+ * Los eventos `status`, `level`, `spectrum`, `dsp` y `analysis` incluyen
+ * además todos los campos de su respectiva estructura (serde los aplana).
  */
 export type EngineEvent =
   | (EngineStatus & { type: "status" })
   | (LevelSample & { type: "level" })
+  | (SpectrumSample & { type: "spectrum" })
   | (DeviceList & { type: "devices" })
   | (DspState & { type: "dsp" })
   | (AnalysisSample & { type: "analysis" })

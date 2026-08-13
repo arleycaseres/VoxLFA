@@ -27,14 +27,15 @@ use ringbuf::traits::*;
 use ringbuf::HeapRb;
 
 use crate::analysis::{
-    AnalysisHandle, AnalysisShared, BandSplitter, SessionTracker, SuggestionEngine, VoiceAnalyzer,
-    VoiceFrame,
+    AnalysisHandle, AnalysisShared, BandSplitter, SessionTracker, SpectrumAnalyzer,
+    SuggestionEngine, VoiceAnalyzer, VoiceFrame,
 };
 use crate::dsp::DspHandle;
 use crate::dsp::{AudioProcessor, ChainProcessor, DspCommand, LevelMeter, ProcessingInfo};
 use crate::error::Error;
 use crate::protocol::{
     AnalysisSample, AudioDeviceInfo, EngineEvent, EngineState, EngineStatus, LevelSample, PresetId,
+    SpectrumSample, SPECTRUM_BIN_COUNT,
 };
 use crate::Result;
 
@@ -54,6 +55,13 @@ const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(50);
 /// [`BandSplitter`] y se envía al hilo de análisis por un canal acotado.
 const ANALYSIS_FRAME_INTERVAL: Duration = Duration::from_millis(200);
 
+/// Intervalo mínimo entre eventos `EngineEvent::Spectrum` emitidos a la UI.
+///
+/// La FFT se calcula en cada avance de ventana (50 % de solapamiento); esta
+/// constante solo acota la frecuencia de emisión para no saturar el canal ni
+/// el frontend (20 Hz es suficiente para una vista fluida).
+const SPECTRUM_EMIT_INTERVAL: Duration = Duration::from_millis(50);
+
 /// Ventana deslizante de la voz (ms) usada para calcular las métricas.
 const ANALYSIS_WINDOW_MS: u32 = 2000;
 
@@ -66,6 +74,9 @@ const ANALYSIS_CHANNEL_CAPACITY: usize = 64;
 
 /// Latencia reportada antes de que haya señal circulando.
 const LATENCY_UNKNOWN: f32 = 0.0;
+
+/// Piso de dBFS para las bandas del espectro antes de la primera FFT.
+const SILENCE_DB: f32 = -120.0;
 
 /// Configuración con la que se arranca el motor de audio.
 #[derive(Debug, Clone)]
@@ -252,6 +263,13 @@ impl AudioEngine {
         let mut last_frame_emit = Instant::now();
         let analysis_frame_tx = analysis_tx.clone();
 
+        // Espectro (FFT): analizador sin asignación en el callback; las bandas
+        // más recientes se copian y se emiten acotadas por tiempo.
+        let mut spectrum = SpectrumAnalyzer::new(sample_rate);
+        let mut last_spectrum = [SILENCE_DB; SPECTRUM_BIN_COUNT];
+        let mut last_spectrum_emit = Instant::now();
+        let tx_spectrum = tx.clone();
+
         let input_stream = input
             .build_input_stream::<f32, _, _>(
                 &input_config,
@@ -314,7 +332,21 @@ impl AudioEngine {
                         let _ = analysis_frame_tx.try_send(frame);
                     }
 
-                    // 4) Medir nivel de entrada y de salida (pre/post) y emitir
+                    // 4) Espectro: acumular la FFT (sin asignar) y emitir la
+                    //    última ventana de bandas acotada por tiempo.
+                    if let Some(bins) = spectrum.process(samples) {
+                        last_spectrum = bins;
+                    }
+                    if last_spectrum_emit.elapsed() >= SPECTRUM_EMIT_INTERVAL {
+                        last_spectrum_emit = Instant::now();
+                        let _ = tx_spectrum.send(EngineEvent::Spectrum(SpectrumSample {
+                            bins_db: last_spectrum,
+                            sample_rate,
+                            captured_at_ms: now_ms(),
+                        }));
+                    }
+
+                    // 5) Medir nivel de entrada y de salida (pre/post) y emitir
                     //    evento, acotado por tiempo.
                     let input_levels = level_meter.process(samples);
                     let output_levels = output_meter.process(&scratch);

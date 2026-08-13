@@ -76,7 +76,7 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
 - `protocol`: contratos serde de eventos y comandos (ver `docs/protocolo.md`),
   incluida la especificación DSP (`protocol/dsp.rs`) que es la única fuente de
   configuración JSON, y el análisis vocal (`protocol/analysis.rs`).
-- `analysis`: asistente vocal local (Fase 2):
+- `analysis`: asistente vocal local (Fase 2) + visualizador (Fase 2.8):
   - `bands::BandSplitter` divide la señal en bandas con **biquads fijos**
     (graves <200 Hz, baja-media ~300 Hz, media ~1.2 kHz, agudos >4 kHz) y
     acumula energías, picos y cruces por cero. Corre en el callback de audio:
@@ -93,6 +93,16 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
     sesión y `apply_suggestion` (delega en `DspHandle` para reconfigurar en
     vivo). El estado compartido (`AnalysisShared`) lo escribe el hilo de
     análisis.
+  - `fft::SpectrumAnalyzer` (visualizador): **FFT de 2048 puntos** con ventana
+    Hann y **50 % de solapamiento** (`rustfft`), reducida a **32 bandas
+    logarítmicas** (20 Hz → Nyquist/20 kHz) que reportan el pico por banda en
+    dBFS. Corre en el callback de audio sin asignar memoria (ventana, anillo de
+    entrada, buffers de FFT, scratch y `smoothed_db` preasignados en
+    `new(sample_rate)`); `process` devuelve por valor un `Option<[f32; 32]>`.
+    El suavizado usa ataque one-pole de 10 ms y **release lineal en dB**
+    (60 dB/s) para una vista estable. El motor lo emite como
+    `EngineEvent::Spectrum` a ~20 Hz (`SPECTRUM_EMIT_INTERVAL` 50 ms) sobre la
+    entrada pre-DSP.
 
 Los callbacks de `cpal` **no asignan memoria ni bloquean mutex**: solo
 intercambian el puntero de la cadena activa, procesan el bloque en *scratch*
@@ -141,10 +151,13 @@ el escritorio ejecuta contra el motor; el resultado vuelve como evento `dsp`.
 2. El core procesa el bloque con la cadena DSP activa (puntero conmutado por
    `DspHandle`, sin bloqueos), copia las muestras al ring buffer, acumula
    energías de banda en el `BandSplitter` y publica métricas de nivel de
-   entrada **y** salida.
+   entrada **y** salida. El `SpectrumAnalyzer` alimenta además la FFT con la
+   entrada pre-DSP y, cada avance de ventana (50 % de solapamiento), suaviza el
+   espectro.
 3. Un hilo dedicado en el core drena métricas y emite `EngineEvent` por canal
-   `mpsc` (niveles cada 50 ms; el estado en cada transición). Cada 200 ms el
-   `BandSplitter` extrae un `VoiceFrame` a otro hilo dedicado de análisis.
+   `mpsc` (niveles cada 50 ms; espectro cada ~50 ms; el estado en cada
+   transición). Cada 200 ms el `BandSplitter` extrae un `VoiceFrame` a otro
+   hilo dedicado de análisis.
 4. El hilo de análisis desliza la ventana, evalúa sugerencias, mantiene el
    resumen de sesión (consultable vía `AnalysisHandle`) y emite
    `EngineEvent::Analysis` (máx. cada ~500 ms).
@@ -154,6 +167,8 @@ el escritorio ejecuta contra el motor; el resultado vuelve como evento `dsp`.
 6. `EngineManager` (forwarder) actualiza el estado compartido y reenvía:
    - a la UI como evento Tauri `engine-event`;
    - al WebSocket como JSON serializado.
+   También cachea el último espectro (`last_spectrum`) para que la UI pinte al
+   instante sin esperar el siguiente evento.
 7. El móvil valida el JSON con su guard de tipos y actualiza la vista.
 
 ## Reconfiguración DSP en vivo
@@ -237,6 +252,9 @@ es mínimo (la métrica real se lee en cada bloque).
 | Reemplazo del módulo EQ solo (`SetLinkProcessor`) | Ajuste fino sin reconstruir la cadena entera ni perder el estado de reverb/delay |
 | Bandas del EQ en el estado (`eqBands`) | La UI y el móvil ven la configuración real, no solo el preset |
 | Análisis sin FFT (bandas con biquads) | O(n), sin dependencia extra y sin asignación en el callback |
+| Visualizador con FFT (`rustfft`, 2048/50 % solapamiento) reducida a 32 bandas logarítmicas | Sin FFT a pleno resolución por el WS/móvil; la escala log en frecuencia y dB coincide con la percepción |
+| Espectro suavizado: ataque one-pole + release lineal en dB | Barra estable sin temblor; el one-pole en dB decayó demasiado rápido (falló el test) |
+| Espectro emitido a ~20 Hz sobre la entrada pre-DSP | Muestra la señal cruda, sin el resultado del procesamiento; no satura el canal |
 | Análisis en hilo dedicado + canal acotado | Las sugerencias y los `String` no tocan el camino de audio |
 | `DspCommand` sin `Debug` | Evita `unwrap`/`expect` y simplifica el patrón |
 | Perfiles por dispositivo de entrada (nombre) | Recuerda preset/EQ/bypass al reconectar el mismo dispositivo |
@@ -265,6 +283,9 @@ es mínimo (la métrica real se lee en cada bloque).
 - El perfil se indexa por el **nombre del dispositivo de entrada**: si el
   sistema cambia el nombre (p. ej. al mover un USB de puerto), el perfil se
   pierde para ese dispositivo (no hay identificación por hardware).
+- El visualizador muestra la **entrada pre-DSP** (la señal que captura el
+  micrófono), no la salida procesada; un waterfall persistente y la vista de la
+  salida quedan para una fase posterior.
 - Sin navegación mDNS desde el móvil: el escritorio se anuncia como
   `_voxlfa._tcp.local.`, pero la app móvil no usa un cliente mDNS nativo (rompe
   Expo Go); en su lugar, la cabina muestra un **QR** que codifica la URL

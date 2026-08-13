@@ -14,6 +14,7 @@ import {
   type EngineEvent,
   type EngineStatus,
   type LevelSample,
+  type SpectrumSample,
 } from "../lib/protocol";
 
 /** Estado de la conexión con el escritorio. */
@@ -31,6 +32,8 @@ export interface RemoteEngine {
   status: EngineStatus | null;
   level: LevelSample | null;
   devices: DeviceList | null;
+  /** Último espectro de la entrada (bandas logarítmicas, dBFS). */
+  spectrum: SpectrumSample | null;
   /** Último estado de la cadena DSP del escritorio. */
   dsp: DspState | null;
   /** Última muestra de análisis vocal (métricas + sugerencias del escritorio). */
@@ -49,6 +52,7 @@ export function useRemoteEngine(): RemoteEngine {
   const [status, setStatus] = useState<EngineStatus | null>(null);
   const [level, setLevel] = useState<LevelSample | null>(null);
   const [devices, setDevices] = useState<DeviceList | null>(null);
+  const [spectrum, setSpectrum] = useState<SpectrumSample | null>(null);
   const [dsp, setDsp] = useState<DspState | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisSample | null>(null);
 
@@ -139,6 +143,13 @@ export function useRemoteEngine(): RemoteEngine {
           case "level":
             setLevel(event);
             break;
+          case "spectrum":
+            setSpectrum({
+              binsDb: event.binsDb,
+              sampleRate: event.sampleRate,
+              capturedAtMs: event.capturedAtMs,
+            });
+            break;
           case "devices":
             setDevices({ inputs: event.inputs, outputs: event.outputs });
             break;
@@ -204,6 +215,7 @@ export function useRemoteEngine(): RemoteEngine {
     status,
     level,
     devices,
+    spectrum,
     dsp,
     analysis,
     connect,

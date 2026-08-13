@@ -155,6 +155,15 @@ fn get_last_level(
     Ok(engine.last_level())
 }
 
+/// Devuelve el último espectro emitido (renderizado inicial de la UI).
+#[tauri::command]
+fn get_last_spectrum(
+    state: State<AppState>,
+) -> Result<Option<voxlfa_core::protocol::SpectrumSample>, String> {
+    let engine = state.engine.lock().map_err(|err| err.to_string())?;
+    Ok(engine.last_spectrum())
+}
+
 /// Lista los presets de la cabina con sus metadatos.
 #[tauri::command]
 fn get_presets() -> Result<Vec<PresetInfo>, String> {
@@ -271,6 +280,7 @@ pub fn run() {
             stop_engine,
             get_engine_status,
             get_last_level,
+            get_last_spectrum,
             get_presets,
             get_dsp_state,
             apply_preset,

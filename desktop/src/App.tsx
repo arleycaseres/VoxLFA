@@ -15,6 +15,7 @@ import { PresetCard } from "./components/PresetCard";
 import { DspChain } from "./components/DspChain";
 import { EqPanel } from "./components/EqPanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
+import { SpectrumView } from "./components/SpectrumView";
 import { formatLatency, formatSampleRate } from "./lib/format";
 import "./styles/fonts.css";
 import "./styles/tokens.css";
@@ -175,6 +176,11 @@ export default function App() {
                 <Meter label="PICO" valueDb={level?.outputPeakDb ?? -100} />
               </div>
             </div>
+          </div>
+
+          <div className="panel panel--spectrum">
+            <h2 className="panel__title">Espectro de entrada</h2>
+            <SpectrumView spectrum={engine.spectrum} />
           </div>
 
           <div className="panel panel--telemetry">

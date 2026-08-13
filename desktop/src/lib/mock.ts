@@ -5,6 +5,7 @@
 // ver la cabina con señal simulada. NUNCA se usa dentro de la app de Tauri:
 // `tauri.ts` lo activa solo si `window.__TAURI_INTERNALS__` no está presente.
 
+import { SPECTRUM_BIN_COUNT } from "./types";
 import type {
   AnalysisSample,
   AppConfig,
@@ -19,6 +20,7 @@ import type {
   PresetId,
   PresetInfo,
   SessionSummary,
+  SpectrumSample,
   Suggestion,
   VoiceMetrics,
 } from "./types";
@@ -157,6 +159,9 @@ let lastAnalysis: AnalysisSample | null = null;
 let analysisPhase = 0;
 let analysisTicker: ReturnType<typeof setInterval> | null = null;
 let session: SessionAccumulator = newSession();
+let lastSpectrum: SpectrumSample | null = null;
+let spectrumPhase = 0;
+let spectrumTicker: ReturnType<typeof setInterval> | null = null;
 
 function newSession(): SessionAccumulator {
   return {
@@ -403,6 +408,68 @@ function stopAnalysisTicker() {
   }
 }
 
+/** Frecuencia central (Hz) de la banda logarítmica `i` del espectro. */
+function spectrumCenter(i: number): number {
+  const ratio = Math.pow(1000, 1 / SPECTRUM_BIN_COUNT);
+  return 20 * Math.pow(ratio, i + 0.5);
+}
+
+/**
+ * Amplitud (lineal) de la voz simulada a la frecuencia dada: envolvente de
+ * formantes (~700, 1200, 2600, 3300 Hz), caída de agudos y "peine" de
+ * armónicos del `f0` (las bandas del core ya integran varios bins).
+ */
+function voiceAmplitude(freq: number, f0: number): number {
+  let envelope = 1;
+  for (const fc of [700, 1200, 2600, 3300]) {
+    envelope /= Math.sqrt(1 + Math.pow((freq - fc) / 250, 2));
+  }
+  const rolloff = Math.exp(-freq / 6000);
+  const comb = 0.6 + 0.4 * Math.cos((2 * Math.PI * freq) / f0);
+  return rolloff * envelope * comb;
+}
+
+/**
+ * Genera un espectro vocal simulado: la forma (armónicos + formantes) se
+ * reescala para que el pico coincida con el nivel de entrada del medidor.
+ */
+function nextSpectrum(capturedAtMs: number): SpectrumSample {
+  spectrumPhase += 0.05;
+  const breath = (Math.sin(spectrumPhase * 0.11) + 1) / 2;
+  const f0 = 105 + 45 * (1 - breath) + Math.sin(spectrumPhase * 0.7) * 12;
+  const targetPeak = lastLevel?.inputPeakDb ?? -40;
+
+  const raw = new Array<number>(SPECTRUM_BIN_COUNT);
+  let maxAmp = 0;
+  for (let i = 0; i < SPECTRUM_BIN_COUNT; i += 1) {
+    const amp = voiceAmplitude(spectrumCenter(i), f0);
+    raw[i] = amp;
+    if (amp > maxAmp) maxAmp = amp;
+  }
+
+  const gain = Math.pow(10, targetPeak / 20) / maxAmp;
+  const binsDb = raw.map((amp) =>
+    Math.max(20 * Math.log10(amp * gain), -120),
+  );
+  return { binsDb, sampleRate, capturedAtMs };
+}
+
+function startSpectrumTicker() {
+  stopSpectrumTicker();
+  spectrumPhase = 0;
+  spectrumTicker = setInterval(() => {
+    lastSpectrum = nextSpectrum(Date.now());
+    emit({ type: "spectrum", ...lastSpectrum });
+  }, LEVEL_EMIT_INTERVAL_MS);
+}
+
+function stopSpectrumTicker() {
+  if (spectrumTicker !== null) {
+    clearInterval(spectrumTicker);
+    spectrumTicker = null;
+  }
+}
+
 export function listDevices(): Promise<DeviceList> {
   return Promise.resolve(FAKE_DEVICES);
 }
@@ -419,6 +486,7 @@ export function startEngine(requested?: number | null): Promise<void> {
       syncDsp();
       startTicker();
       startAnalysisTicker();
+      startSpectrumTicker();
       resolve();
     }, 650);
   });
@@ -428,6 +496,7 @@ export function stopEngine(): Promise<void> {
   return new Promise((resolve) => {
     stopTicker();
     stopAnalysisTicker();
+    stopSpectrumTicker();
     state = "stopping";
     syncStatus();
     setTimeout(() => {
@@ -444,6 +513,10 @@ export function getEngineStatus(): Promise<EngineStatus | null> {
 
 export function getLastLevel(): Promise<LevelSample | null> {
   return Promise.resolve(lastLevel);
+}
+
+export function getLastSpectrum(): Promise<SpectrumSample | null> {
+  return Promise.resolve(hasRun ? lastSpectrum : null);
 }
 
 export function getPresets(): Promise<PresetInfo[]> {

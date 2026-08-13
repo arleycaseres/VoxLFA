@@ -120,6 +120,32 @@ Objetivo: que el móvil descubra el escritorio sin teclear la IP.
       un build con dev tools; el QR resuelve la autodetección sin compilar.
 - [x] Documentación actualizada (protocolo, seguridad, arquitectura).
 
+## Fase 2.8 — Visualizador de espectro (FFT) en tiempo real ✅
+
+Objetivo: ver el espectro de la voz capturada en vivo (Fase 5 del plan, que
+podía ir en paralelo con la Fase 2).
+
+- [x] `SpectrumAnalyzer` en `voxlfa-core` (`analysis/fft.rs`): FFT de 2048
+      puntos con ventana Hann y 50 % de solapamiento (`rustfft`), sin asignar
+      memoria en el callback (ventana, anillo, buffers y scratch preasignados).
+- [x] La FFT se reduce a **32 bandas logarítmicas** (20 Hz → Nyquist/20 kHz);
+      cada banda reporta el pico en dBFS suavizado con ataque rápido (one-pole)
+      y release lineal en dB (60 dB/s) para una vista estable.
+- [x] Evento `EngineEvent::Spectrum` (máx. cada 50 ms) sobre la entrada
+      pre-DSP; `SpectrumSample` con `binsDb`, `sampleRate` y `capturedAtMs`.
+- [x] El escritorio lo reenvía a la cabina y al móvil; `EngineManager` guarda el
+      último espectro (`get_last_spectrum` para el render inicial).
+- [x] Cabina: `SpectrumView` (canvas) con barras en escala logarítmica de
+      frecuencia y dB, rejilla y zona caliente (≥ -6 dBFS) en naranja.
+- [x] Móvil: barras del espectro en `MonitorView` (mismo contrato y guard de
+      tipos `isEngineEvent`).
+- [x] Verificación completa (fmt, clippy, 118 tests, builds desktop y móvil).
+
+> El análisis vocal de la Fase 2 sigue coexistiendo: las bandas (biquads) para
+> métricas/sugerencias y la FFT para el visualizador. La FFT también servirá de
+> base a la detección de feedback de la Fase 2 original (análisis espectral del
+> acople).
+
 ## Fase 3 — Persistencia y perfiles por dispositivo ✅
 
 Objetivo: que la cabina recuerde la configuración del usuario y la reaplique al

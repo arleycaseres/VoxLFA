@@ -38,6 +38,19 @@ export interface LevelSample {
   capturedAtMs: number;
 }
 
+/** Número fijo de bandas logarítmicas del espectro emitido por el motor. */
+export const SPECTRUM_BIN_COUNT = 32;
+
+/** Muestra del espectro de la entrada (FFT) emitida en vivo. */
+export interface SpectrumSample {
+  /** Nivel de cada banda logarítmica en dBFS (longitud fija). */
+  binsDb: number[];
+  /** Frecuencia de muestreo (Hz) de la captura; define los bordes de banda. */
+  sampleRate: number;
+  /** Tiempo monotónico (ms) de la captura. */
+  capturedAtMs: number;
+}
+
 /** Identificador de un preset de la cabina. */
 export type PresetId = "dry" | "vozLimpia" | "radio" | "warm";
 
@@ -147,6 +160,7 @@ export type ControlCommand =
 export type EngineEvent =
   | (EngineStatus & { type: "status" })
   | (LevelSample & { type: "level" })
+  | (SpectrumSample & { type: "spectrum" })
   | (DeviceList & { type: "devices" })
   | (DspState & { type: "dsp" })
   | (AnalysisSample & { type: "analysis" })
@@ -166,6 +180,13 @@ export function isEngineEvent(raw: unknown): raw is EngineEvent {
         typeof event.inputPeakDb === "number" &&
         typeof event.outputRmsDb === "number" &&
         typeof event.outputPeakDb === "number"
+      );
+    case "spectrum":
+      return (
+        Array.isArray(event.binsDb) &&
+        event.binsDb.every((value) => typeof value === "number") &&
+        typeof event.sampleRate === "number" &&
+        typeof event.capturedAtMs === "number"
       );
     case "devices":
       return Array.isArray(event.inputs) && Array.isArray(event.outputs);

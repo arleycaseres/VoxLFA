@@ -15,6 +15,7 @@ import type {
   PresetId,
   PresetInfo,
   SessionSummary,
+  SpectrumSample,
 } from "../lib/types";
 import {
   applyPreset,
@@ -24,6 +25,7 @@ import {
   getDspState,
   getEngineStatus,
   getLastLevel,
+  getLastSpectrum,
   getPairingInfo,
   getPresets,
   getSessionSummary,
@@ -43,6 +45,8 @@ export interface EngineController {
   status: EngineStatus | null;
   /** Última muestra de nivel (para diales y medidores). */
   level: LevelSample | null;
+  /** Último espectro de la entrada (bandas logarítmicas, dBFS). */
+  spectrum: SpectrumSample | null;
   /** Dispositivos de audio detectados. */
   devices: DeviceList | null;
   /** Datos de emparejamiento (móvil ↔ escritorio). */
@@ -95,6 +99,7 @@ export interface EngineController {
 export function useEngine(): EngineController {
   const [status, setStatus] = useState<EngineStatus | null>(null);
   const [level, setLevel] = useState<LevelSample | null>(null);
+  const [spectrum, setSpectrum] = useState<SpectrumSample | null>(null);
   const [devices, setDevices] = useState<DeviceList | null>(null);
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   const [presets, setPresets] = useState<PresetInfo[] | null>(null);
@@ -204,6 +209,13 @@ export function useEngine(): EngineController {
         case "level":
           setLevel(event);
           break;
+        case "spectrum":
+          setSpectrum({
+            binsDb: event.binsDb,
+            sampleRate: event.sampleRate,
+            capturedAtMs: event.capturedAtMs,
+          });
+          break;
         case "devices":
           setDevices({ inputs: event.inputs, outputs: event.outputs });
           break;
@@ -236,10 +248,11 @@ export function useEngine(): EngineController {
     }).catch(() => undefined);
 
     (async () => {
-      const [status, level, pairing, presets, config, dsp, analysis] =
+      const [status, level, spectrum, pairing, presets, config, dsp, analysis] =
         await Promise.allSettled([
           getEngineStatus(),
           getLastLevel(),
+          getLastSpectrum(),
           getPairingInfo(),
           getPresets(),
           getConfig(),
@@ -249,6 +262,8 @@ export function useEngine(): EngineController {
       if (cancelled) return;
       if (status.status === "fulfilled") setStatus(status.value);
       if (level.status === "fulfilled" && level.value) setLevel(level.value);
+      if (spectrum.status === "fulfilled" && spectrum.value)
+        setSpectrum(spectrum.value);
       if (pairing.status === "fulfilled") setPairing(pairing.value);
       if (presets.status === "fulfilled" && presets.value)
         setPresets(presets.value);
@@ -270,6 +285,7 @@ export function useEngine(): EngineController {
   return {
     status,
     level,
+    spectrum,
     devices,
     pairing,
     presets,

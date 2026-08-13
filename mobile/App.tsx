@@ -49,6 +49,7 @@ export default function App() {
               <MonitorView
                 status={remote.status}
                 level={remote.level}
+                spectrum={remote.spectrum}
                 dsp={remote.dsp}
                 analysis={remote.analysis}
               />

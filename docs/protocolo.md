@@ -53,6 +53,28 @@ mensajes JSON por el WebSocket para el móvil.
 - `outputRmsDb`/`outputPeakDb`: señal **después** de la cadena DSP.
 - `capturedAtMs` es tiempo monotónico.
 
+### `spectrum` — espectro de la entrada en vivo (FFT, máx. cada 50 ms)
+
+```json
+{
+  "type": "spectrum",
+  "binsDb": [-62.4, -58.1, -50.2, -42.7, -31.0, -24.5, -19.2, -14.8, ...],
+  "sampleRate": 48000,
+  "capturedAtMs": 1723400000123
+}
+```
+
+- `binsDb`: nivel pico de cada banda logarítmica en **dBFS** (suavizado
+  ataque/release). Longitud fija **32** (constante `SPECTRUM_BIN_COUNT` en los
+  tres lados: `core/src/protocol/event.rs`, `desktop/src/lib/types.ts`,
+  `mobile/src/lib/protocol.ts`).
+- La FFT (ventana Hann, 2048 puntos, 50 % de solapamiento) se calcula sobre la
+  **entrada** (señal pre-DSP) y se reduce a 32 bandas entre ~20 Hz y el Nyquist
+  de `sampleRate` (a 48 kHz, ~23 Hz de resolución por bin).
+- `sampleRate` define los bordes de banda: el consumidor reconstruye la escala
+  logarítmica como `edge_i = 20 · (min(nyquist, 20 kHz) / 20)^(i/32)`.
+- Las barras con nivel ≥ -6 dBFS se dibujan en naranja (zona caliente).
+
 ### `dsp` — estado de la cadena DSP (emitido al iniciar y en cada cambio)
 
 ```json

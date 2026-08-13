@@ -20,7 +20,9 @@ use voxlfa_core::analysis::AnalysisHandle;
 use voxlfa_core::audio::{AudioEngine, AudioEngineConfig, DspHandle, EngineHandle};
 use voxlfa_core::config::{ConfigStore, DEFAULT_DEVICE_KEY};
 use voxlfa_core::dsp::PresetFactory;
-use voxlfa_core::protocol::{DspState, EngineEvent, EngineStatus, LevelSample, PresetId};
+use voxlfa_core::protocol::{
+    DspState, EngineEvent, EngineStatus, LevelSample, PresetId, SpectrumSample,
+};
 
 /// Errores del gestor del motor.
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +51,8 @@ pub struct EngineManager {
     status: Arc<Mutex<Option<EngineStatus>>>,
     /// Último nivel medido (renderizado inicial de la UI).
     level: Arc<Mutex<Option<LevelSample>>>,
+    /// Último espectro emitido (renderizado inicial de la UI).
+    spectrum: Arc<Mutex<Option<SpectrumSample>>>,
     /// Último estado de la cadena DSP conocido.
     dsp_state: Arc<Mutex<Option<DspState>>>,
     /// Emisor de eventos serializados (JSON) hacia el WebSocket.
@@ -76,6 +80,7 @@ impl EngineManager {
             analysis: None,
             status: Arc::new(Mutex::new(None)),
             level: Arc::new(Mutex::new(None)),
+            spectrum: Arc::new(Mutex::new(None)),
             dsp_state: Arc::new(Mutex::new(None)),
             events,
             config,
@@ -96,6 +101,11 @@ impl EngineManager {
     /// Último nivel de audio medido, si lo hay.
     pub fn last_level(&self) -> Option<LevelSample> {
         self.level.lock().ok().and_then(|level| *level)
+    }
+
+    /// Último espectro emitido por el motor, si lo hay.
+    pub fn last_spectrum(&self) -> Option<SpectrumSample> {
+        self.spectrum.lock().ok().and_then(|spectrum| *spectrum)
     }
 
     /// Último estado de la cadena DSP observado, si lo hay.
@@ -182,6 +192,7 @@ impl EngineManager {
         // Hilo forwarder: canal del motor → UI + WebSocket.
         let status = self.status.clone();
         let level = self.level.clone();
+        let spectrum = self.spectrum.clone();
         let dsp_state = self.dsp_state.clone();
         let events = self.events.clone();
         let on_frontend: Option<Arc<FrontendCallback>> =
@@ -200,6 +211,11 @@ impl EngineManager {
                     if let EngineEvent::Level(level_event) = &event {
                         if let Ok(mut guard) = level.lock() {
                             *guard = Some(*level_event);
+                        }
+                    }
+                    if let EngineEvent::Spectrum(spectrum_event) = &event {
+                        if let Ok(mut guard) = spectrum.lock() {
+                            *guard = Some(*spectrum_event);
                         }
                     }
                     if let EngineEvent::Dsp(state) = &event {

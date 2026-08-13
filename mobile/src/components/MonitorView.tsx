@@ -10,13 +10,17 @@ import type {
   DspState,
   EngineStatus,
   LevelSample,
+  SpectrumSample,
   Suggestion,
 } from "../lib/protocol";
+import { SPECTRUM_BIN_COUNT } from "../lib/protocol";
 
 /** Nivel que corresponde al 100% de la barra (dBFS). */
 const DB_FULL = 0;
 /** Nivel que corresponde al 0% de la barra (dBFS). */
 const DB_EMPTY = -48;
+/** Nivel del 0% para las barras del espectro (dBFS). */
+const SPECTRUM_EMPTY = -60;
 
 const STATE_TEXT: Record<string, string> = {
   stopped: "DETENIDO",
@@ -28,6 +32,12 @@ const STATE_TEXT: Record<string, string> = {
 
 function fillPercent(dbfs: number): number {
   const f = Math.min(1, Math.max(0, (dbfs - DB_EMPTY) / (DB_FULL - DB_EMPTY)));
+  return f * 100;
+}
+
+/** Altura (0–100%) de una banda del espectro (escala de -60 a 0 dBFS). */
+function spectrumPercent(dbfs: number): number {
+  const f = Math.min(1, Math.max(0, (dbfs - SPECTRUM_EMPTY) / (DB_FULL - SPECTRUM_EMPTY)));
   return f * 100;
 }
 
@@ -68,8 +78,40 @@ function formatFreq(freqHz: number): string {
 interface MonitorViewProps {
   status: EngineStatus | null;
   level: LevelSample | null;
+  spectrum: SpectrumSample | null;
   dsp: DspState | null;
   analysis: AnalysisSample | null;
+}
+
+/**
+ * Barras del espectro en escala logarítmica de frecuencia: cada banda ocupa el
+ * mismo tramo logarítmico (flex 1), así que la fila entera representa
+ * ~20 Hz → Nyquist en escala log.
+ */
+function SpectrumBars({ spectrum }: { spectrum: SpectrumSample | null }) {
+  const bins = spectrum?.binsDb ?? [];
+  return (
+    <View style={styles.spectrumRow}>
+      {Array.from({ length: SPECTRUM_BIN_COUNT }, (_, i) => {
+        const db = bins[i] ?? -120;
+        const fill = spectrumPercent(db);
+        const hot = db >= -6;
+        return (
+          <View key={i} style={styles.spectrumCol}>
+            <View style={styles.spectrumTrack}>
+              <View
+                style={[
+                  styles.spectrumBar,
+                  hot ? styles.spectrumBarHot : null,
+                  { height: `${fill}%` },
+                ]}
+              />
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
 }
 
 /** Barra de nivel vertical (cian, naranja al acercarse a 0 dBFS). */
@@ -96,7 +138,7 @@ function LevelBar({ label, valueDb, peakDb }: { label: string; valueDb: number; 
   );
 }
 
-export function MonitorView({ status, level, dsp, analysis }: MonitorViewProps) {
+export function MonitorView({ status, level, spectrum, dsp, analysis }: MonitorViewProps) {
   const state = status?.state ?? "stopped";
   const running = state === "running";
 
@@ -131,6 +173,19 @@ export function MonitorView({ status, level, dsp, analysis }: MonitorViewProps) 
             <LevelBar label="RMS" valueDb={level?.outputRmsDb ?? -100} peakDb={level?.outputPeakDb} />
             <LevelBar label="PICO" valueDb={level?.outputPeakDb ?? -100} />
           </View>
+        </View>
+      </View>
+
+      {/* Espectro de la entrada en vivo */}
+      <View style={styles.infoCard}>
+        <Text style={styles.cardTitle}>ESPECTRO</Text>
+        <SpectrumBars spectrum={spectrum} />
+        <View style={styles.spectrumLabels}>
+          <Text style={styles.spectrumLabel}>20 Hz</Text>
+          <Text style={styles.spectrumLabel}>1 kHz</Text>
+          <Text style={styles.spectrumLabel}>
+            {status ? `${Math.round(Math.min(status.sampleRate / 2, 20000) / 1000)} kHz` : "—"}
+          </Text>
         </View>
       </View>
 
@@ -440,6 +495,43 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  spectrumRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    height: 120,
+    gap: 2,
+  },
+  spectrumCol: {
+    flex: 1,
+    height: "100%",
+  },
+  spectrumTrack: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "#0c0e10",
+    borderRadius: 2,
+    borderWidth: 1,
+    borderColor: "#2a2e34",
+    overflow: "hidden",
+  },
+  spectrumBar: {
+    width: "100%",
+    backgroundColor: "#4fd8ff",
+    borderRadius: 1,
+  },
+  spectrumBarHot: {
+    backgroundColor: "#ff4a1f",
+  },
+  spectrumLabels: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 2,
+  },
+  spectrumLabel: {
+    color: "#8a929c",
+    fontSize: 9,
+    fontFamily: "monospace",
   },
   eqGrid: {
     flexDirection: "row",

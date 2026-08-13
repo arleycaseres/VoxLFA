@@ -23,4 +23,7 @@ pub use control::ControlCommand;
 pub use dsp::{
     DspLinkState, DspModuleKind, DspModuleSpec, DspState, EqBand, EqBandKind, PresetId, PresetInfo,
 };
-pub use event::{AudioDeviceInfo, EngineEvent, EngineState, EngineStatus, LevelSample};
+pub use event::{
+    AudioDeviceInfo, EngineEvent, EngineState, EngineStatus, LevelSample, SpectrumSample,
+    SPECTRUM_BIN_COUNT,
+};
