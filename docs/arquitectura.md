@@ -29,8 +29,9 @@ resumen de sesión exportable.
 └────────────┘   comandos (invoke) ───────► │  EngineManager        │
                                             │  pairing + WS server  │
                                             └──────────┬────────────┘
-        ┌──────────────────────────────────────────────┘  eventos (JSON,
-        │                                        WebSocket autenticado)
+        ┌──────────────────────────────────────────────────┘  eventos (JSON,
+        │                                        WebSocket autenticado: eventos
+        │                                        salientes + comandos entrantes)
 ┌───────▼────────┐        canal mpsc       ┌───────────────┐
 │ voxlfa-core    │ ──────────────────────► │ hilo forwarder│──► UI + WS
 │ (motor de      │   callbacks de audio    └───────────────┘
@@ -106,8 +107,11 @@ Cáscara de escritorio que orquesta el core:
   hilo *forwarder* que consume el canal del motor y reenvía cada evento a la UI
   (vía `app.emit`) y al WebSocket (vía broadcast serializado).
 - `src-tauri/src/ws.rs`: servidor WebSocket local (puerto `4356`) que difunde
-  los eventos del motor a la app móvil. El handshake **exige** el código de
-  emparejamiento en la URL; sin él responde `401`.
+  los eventos del motor a la app móvil **y recibe sus comandos de control**
+  (`stop`, `setPreset`, `setGlobalBypass`, `setLinkBypass`, `setEqBand`). El
+  handshake **exige** el código de emparejamiento en la URL; sin él responde
+  `401`. Los comandos se ejecutan contra el mismo `EngineManager` que la cabina
+  (compartido por `Arc<Mutex<…>>`); los fallos se responden con un `warning`.
 - `src-tauri/src/pairing.rs`: genera códigos de 6 caracteres sin caracteres
   ambiguos (`0/O`, `1/I/l`).
 - `src-tauri/src/tauri_app.rs` (feature `webview`): comandos expuestos a la UI,
@@ -122,11 +126,14 @@ escritorio es solo de lectura: el código se genera una vez y se muestra.
 
 ### `mobile/` — VoxLFA Monitor (Expo/React Native)
 
-Aplicación de **monitoreo remoto** (no procesa audio). Se conecta al WebSocket
-del escritorio en la red local con la IP, el puerto y el código de
-emparejamiento. Muestra estado, latencia, niveles pre/post de la cadena DSP y el
-preset activo en tiempo real, con reconexión automática por retroceso
-exponencial.
+Aplicación de **monitoreo y control remoto** (no procesa audio). Se conecta al
+WebSocket del escritorio en la red local con la IP, el puerto y el código de
+emparejamiento. Muestra estado, latencia, niveles pre/post de la cadena DSP, el
+preset activo y el análisis vocal en tiempo real, con reconexión automática por
+retroceso exponencial. Desde la Fase 2 (bloque 5) también **controla el motor**:
+`ControlPanel` envía comandos por el socket (detener, cambiar preset, bypass
+global/por módulo y ajustar el EQ por banda en pasos de 1 dB, rango ±18 dB) que
+el escritorio ejecuta contra el motor; el resultado vuelve como evento `dsp`.
 
 ## Flujo de eventos
 
@@ -161,6 +168,27 @@ La cadena no se toca desde el hilo de audio:
    (`SetLinkProcessor`), sin reconstruir reverb/delay ni perder su estado.
 3. El callback de audio solo ve el puntero nuevo en la siguiente iteración;
    actualiza `Arc<Mutex<DspState>>` y emite `EngineEvent::Dsp`.
+
+## Control remoto desde el móvil
+
+El WebSocket pasa de solo difundir a ser **bidireccional**:
+
+1. El móvil envía un `ControlCommand` (JSON, `tag = "type"`) por el socket.
+2. El servidor valida el tamaño (≤ 1 KB), lo deserializa y, con el mutex del
+   `EngineManager` tomado solo durante la ejecución (nunca al hacer `await`),
+   delega en los mismos métodos que usa la cabina (`stop`, `apply_preset`,
+   `set_global_bypass`, `set_link_bypass`, `set_eq_band`).
+3. `EngineManager` persiste el cambio (igual que desde la cabina) y el core
+   emite el evento `Dsp`/`status` correspondiente, que el WS vuelve a difundir a
+   todos los clientes: el móvil se entera del resultado sin respuestas dedicadas.
+4. Si el comando falla (motor detenido, preset sin EQ, índice fuera de rango,
+   `start` no permitido), se responde **solo al cliente que lo envió** con un
+   evento `warning`. La ganancia del EQ se acota a `[-18, 18]` dB antes de
+   ejecutar (validación de entrada de red).
+
+`start` no se acepta por el WebSocket: arrancar el motor requiere el callback de
+eventos de la ventana (Tauri), así que la cabina sigue siendo la única que
+arranca; el móvil puede detener, pero no iniciar.
 
 ## Persistencia y perfiles por dispositivo
 
@@ -216,6 +244,9 @@ es mínimo (la métrica real se lee en cada bloque).
 | EQ fino en memoria + volcado al detener | No escribe `config.json` en cada paso del slider |
 | Config tolerante a fallos (best-effort) | Un archivo corrupto nunca impide arrancar la sesión |
 | WebSocket con token en la URL | Autenticación simple y sin estado |
+| WS bidireccional: comandos móvil → motor | Control remoto con el mismo gestor y validación de entrada |
+| Mutex solo durante la ejecución del comando | Nunca se bloquea el `await` de red sosteniendo el lock |
+| `start` reservado a la cabina | Arrancar exige el callback de eventos de la ventana; evita desincronizar la UI |
 | Tipos espejo en tres lenguajes | Contrato único y verificable |
 
 ## Límites y pendientes
@@ -224,8 +255,10 @@ es mínimo (la métrica real se lee en cada bloque).
   modelo entrenado); los umbrales de `suggest.rs` se afinan con voz real.
 - La UI aplica **presets existentes** a partir de las sugerencias; la
   generación de presets a medida queda para una fase posterior.
-- El móvil **solo monitorea** el análisis y las sugerencias (el bloque 5,
-  control desde el móvil con autenticación mutua, quedó fuera de la Fase 2).
+- El móvil controla el motor (stop, preset, bypass y EQ) autenticado solo con el
+  **código de emparejamiento**: en la red local ese token equivale a mando
+  remoto. No hay autenticación mutua por dispositivo; un cliente con el código
+  puede detener el motor o reconfigurar la cadena.
 - El perfil se indexa por el **nombre del dispositivo de entrada**: si el
   sistema cambia el nombre (p. ej. al mover un USB de puerto), el perfil se
   pierde para ese dispositivo (no hay identificación por hardware).

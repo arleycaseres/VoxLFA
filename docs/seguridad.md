@@ -19,6 +19,10 @@ de esta página son obligatorias y se verifican en cada revisión.
   la URL (`?token=...`). El handshake lo valida; si no, responde `401` y cierra.
   La validación ocurre antes de aceptar la conexión, por lo que un cliente sin
   token **no** puede consumir eventos.
+- **El token equivale a mando remoto**: el cliente autenticado puede detener el
+  motor y reconfigurar la cadena (preset, bypasses y EQ). No hay autenticación
+  mutua por dispositivo; proteger el código y no compartirlo fuera de la red de
+  confianza.
 - **No loguear códigos**: el código generado vive en `AppState` y nunca se
   escribe en logs de producción ni en eventos.
 - **Longitud**: el token se compara por igualdad exacta con el código generado
@@ -29,6 +33,16 @@ de esta página son obligatorias y se verifican en cada revisión.
   usarse solo en redes de confianza.
 - **Tasas de reintento**: el móvil aplica retroceso exponencial acotado (máx.
   8 s, máx. 5 reintentos) para no saturar el escritorio con reintentos.
+
+### Entradas de control (comandos del móvil)
+
+Todo comando entrante se valida antes de ejecutarse:
+
+- Tamaño ≤ 1 KB (rechazado con `warning` si lo supera).
+- JSON deserializable como `ControlCommand` (rechazado con `warning` si no).
+- `start` se rechaza: arrancar el motor solo desde la cabina.
+- La ganancia del EQ se acota a `[-18, 18]` dB; el resto de rangos los valida el
+  motor (índices de banda, nombres de módulo, preset).
 
 ## CSP de Tauri
 
@@ -77,5 +91,6 @@ La verificación final del proyecto ejecuta, además de tests:
 
 - Rotación del código de emparejamiento tras N intentos fallidos.
 - Cifrado en tránsito si el WebSocket sale de la red local (wss + TLS).
-- Autenticación mutua del móvil (clave por dispositivo) si se añade control
-  remoto del motor.
+- Autenticación mutua del móvil (clave por dispositivo): se evaluó y se
+  descartó por ahora; el código de emparejamiento sigue siendo el único factor
+  que autoriza el control remoto (ver sección WebSocket).

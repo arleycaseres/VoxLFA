@@ -103,6 +103,83 @@ fn control_command_start_uses_camel_case() {
 }
 
 #[test]
+fn control_command_remote_variants_use_camel_case_and_round_trip() {
+    use voxlfa_core::protocol::PresetId;
+
+    let commands = vec![
+        ControlCommand::Stop,
+        ControlCommand::SetPreset {
+            preset: PresetId::Warm,
+        },
+        ControlCommand::SetGlobalBypass { bypass: true },
+        ControlCommand::SetLinkBypass {
+            link: "eq".into(),
+            bypass: true,
+        },
+        ControlCommand::SetEqBand {
+            band_index: 2,
+            gain_db: -4.5,
+        },
+    ];
+
+    for command in commands {
+        let json = serde_json::to_string(&command).unwrap();
+        let decoded: ControlCommand = serde_json::from_str(&json).unwrap();
+        match (command, decoded) {
+            (ControlCommand::Stop, ControlCommand::Stop) => {
+                assert_eq!(json, r#"{"type":"stop"}"#);
+            }
+            (ControlCommand::SetPreset { preset }, ControlCommand::SetPreset { preset: p }) => {
+                assert_eq!(preset, p);
+                assert!(json.contains("\"type\":\"setPreset\""));
+                assert!(json.contains("\"preset\":\"warm\""));
+            }
+            (
+                ControlCommand::SetGlobalBypass { bypass },
+                ControlCommand::SetGlobalBypass { bypass: b },
+            ) => {
+                assert_eq!(bypass, b);
+                assert!(json.contains("\"type\":\"setGlobalBypass\""));
+                assert!(json.contains("\"bypass\":true"));
+            }
+            (
+                ControlCommand::SetLinkBypass { link, bypass },
+                ControlCommand::SetLinkBypass { link: l, bypass: b },
+            ) => {
+                assert_eq!(link, l);
+                assert_eq!(bypass, b);
+                assert!(json.contains("\"type\":\"setLinkBypass\""));
+                assert!(json.contains("\"link\":\"eq\""));
+            }
+            (
+                ControlCommand::SetEqBand {
+                    band_index,
+                    gain_db,
+                },
+                ControlCommand::SetEqBand {
+                    band_index: i,
+                    gain_db: g,
+                },
+            ) => {
+                assert_eq!(band_index, i);
+                assert_eq!(gain_db, g);
+                assert!(json.contains("\"type\":\"setEqBand\""));
+                assert!(json.contains("\"bandIndex\":2"));
+                assert!(json.contains("\"gainDb\":-4.5"));
+            }
+            other => panic!("el comando no preservó su variante: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn unknown_control_command_type_is_rejected() {
+    let invalid = r#"{"type":"fly"}"#;
+    let result: Result<ControlCommand> = serde_json::from_str(invalid).map_err(Into::into);
+    assert!(result.is_err());
+}
+
+#[test]
 fn engine_event_dsp_serializes_with_type_tag() {
     use voxlfa_core::protocol::{DspLinkState, DspState, EqBand, EqBandKind, PresetId};
 

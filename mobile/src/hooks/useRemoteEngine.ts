@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isEngineEvent,
   type AnalysisSample,
+  type ControlCommand,
   type DeviceList,
   type DspState,
   type EngineEvent,
@@ -38,6 +39,8 @@ export interface RemoteEngine {
   connect: (host: string, port: number, code: string) => void;
   /** Cierra la conexión de forma voluntaria. */
   disconnect: () => void;
+  /** Envía un comando de control al escritorio (se ignora si no está conectado). */
+  sendCommand: (command: ControlCommand) => void;
 }
 
 export function useRemoteEngine(): RemoteEngine {
@@ -162,6 +165,13 @@ export function useRemoteEngine(): RemoteEngine {
     [],
   );
 
+  const sendCommand = useCallback((command: ControlCommand) => {
+    const ws = socketRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(command));
+    }
+  }, []);
+
   const connect = useCallback(
     (host: string, port: number, code: string) => {
       const trimmedHost = host.trim();
@@ -188,5 +198,16 @@ export function useRemoteEngine(): RemoteEngine {
     };
   }, [teardown]);
 
-  return { connState, error, status, level, devices, dsp, analysis, connect, disconnect };
+  return {
+    connState,
+    error,
+    status,
+    level,
+    devices,
+    dsp,
+    analysis,
+    connect,
+    disconnect,
+    sendCommand,
+  };
 }

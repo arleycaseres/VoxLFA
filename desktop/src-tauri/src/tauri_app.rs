@@ -31,7 +31,10 @@ const PAIRING_CODE_LENGTH: usize = 6;
 /// Estado global de la aplicación, gestionado por Tauri.
 pub struct AppState {
     /// Gestor del motor de audio (protegido contra acceso concurrente).
-    pub engine: Mutex<EngineManager>,
+    ///
+    /// Es un `Arc` para compartirlo con el servidor WebSocket, que ejecuta los
+    /// comandos de control del móvil contra el mismo gestor que la UI.
+    pub engine: Arc<Mutex<EngineManager>>,
     /// Emisor de eventos serializados (JSON) hacia el WebSocket.
     pub events: broadcast::Sender<String>,
     /// Código de emparejamiento para la app móvil (nunca se loguea).
@@ -42,7 +45,7 @@ impl AppState {
     fn new() -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
-            engine: Mutex::new(EngineManager::new(events.clone())),
+            engine: Arc::new(Mutex::new(EngineManager::new(events.clone()))),
             events,
             pairing_code: Arc::new(generate_pairing_code(PAIRING_CODE_LENGTH)),
         }
@@ -256,11 +259,12 @@ pub fn run() {
             get_pairing_info,
         ])
         .setup(|app| {
-            // Servidor WebSocket para el monitoreo remoto desde el móvil.
+            // Servidor WebSocket para el monitoreo y control remoto desde el móvil.
             let state = app.state::<AppState>();
             let events = state.events.clone();
             let code = state.pairing_code.to_string();
-            tauri::async_runtime::spawn(run_ws_server(events, code, WS_PORT));
+            let engine = state.engine.clone();
+            tauri::async_runtime::spawn(run_ws_server(events, code, engine, WS_PORT));
             Ok(())
         });
 

@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { ConnectionForm } from "./src/components/ConnectionForm";
+import { ControlPanel } from "./src/components/ControlPanel";
 import { MonitorView } from "./src/components/MonitorView";
 import { useRemoteEngine } from "./src/hooks/useRemoteEngine";
 
@@ -40,6 +41,11 @@ export default function App() {
 
           {connected ? (
             <>
+              <ControlPanel
+                running={remote.status?.state === "running"}
+                dsp={remote.dsp}
+                onCommand={remote.sendCommand}
+              />
               <MonitorView
                 status={remote.status}
                 level={remote.level}

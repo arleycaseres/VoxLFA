@@ -128,6 +128,20 @@ export interface SessionSummary {
 }
 
 /**
+ * Comando de control enviado por el móvil al escritorio (tag `type`,
+ * campos camelCase). Espejo de `core/src/protocol/control.rs`.
+ *
+ * `start` NO se incluye a propósito: arrancar el motor solo se permite desde
+ * la cabina de escritorio.
+ */
+export type ControlCommand =
+  | { type: "stop" }
+  | { type: "setPreset"; preset: PresetId }
+  | { type: "setGlobalBypass"; bypass: boolean }
+  | { type: "setLinkBypass"; link: string; bypass: boolean }
+  | { type: "setEqBand"; bandIndex: number; gainDb: number };
+
+/**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).
  */
 export type EngineEvent =

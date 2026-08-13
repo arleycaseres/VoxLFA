@@ -153,7 +153,8 @@ El resumen de la sesión no viaja por evento: se consulta con el comando
 
 ## Comandos (UI → motor)
 
-La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
+La UI de escritorio los envía por Tauri `invoke`; la app móvil envía los mismos
+comandos (excepto `start`) por el WebSocket como mensajes JSON.
 
 ### `start`
 
@@ -170,12 +171,33 @@ La UI los envía por Tauri `invoke` (no por WebSocket en esta fase).
 - `bufferSize` (muestras/callback) es **opcional**: `null` deja que el core lo
   elija con una heurística por dispositivo (USB → 128, Bluetooth/HDMI → 1024,
   resto → 256).
+- **Solo Tauri**: arrancar el motor exige el callback de eventos de la ventana;
+  el WebSocket **rechaza** este comando con un `warning`.
 
 ### `stop`
 
 ```json
 { "type": "stop" }
 ```
+
+### `setPreset`, `setGlobalBypass`, `setLinkBypass`, `setEqBand`
+
+Mismos comandos que los Tauri del escritorio (ver tabla siguiente), con los
+campos en camelCase:
+
+```json
+{ "type": "setPreset",       "preset": "warm" }
+{ "type": "setGlobalBypass", "bypass": true }
+{ "type": "setLinkBypass",   "link": "eq", "bypass": true }
+{ "type": "setEqBand",       "bandIndex": 2, "gainDb": -4.5 }
+```
+
+- El móvil los envía por el WebSocket; el servidor los ejecuta contra el mismo
+  gestor del motor que la cabina y el resultado llega como evento `dsp`.
+- La ganancia del EQ se **acota** en el servidor a `[-18, 18]` dB (rango de la
+  cabina) y `bandIndex` debe existir en el preset activo (si no, error).
+- Si un comando falla (motor detenido, JSON inválido, `start` no permitido,
+  mensaje > 1 KB), el servidor responde al móvil con un evento `warning`.
 
 ## Comandos Tauri del escritorio
 
@@ -253,11 +275,21 @@ móvil: solo lo consume la cabina para precargar los selectores.
 
 Los argumentos en JS usan camelCase (Tauri v2 los convierte desde snake_case).
 
-## WebSocket (móvil → escritorio)
+## WebSocket (móvil ↔ escritorio)
 
 - URL: `ws://<ip>:4356/?token=<código>`.
 - Autenticación: el código de emparejamiento va en el query string. Sin token
   válido, el servidor responde `401` y cierra la conexión.
-- Tráfico: solo **eventos** (server → client). El cliente no envía mensajes.
-- Seguridad: cifrado local `ws://` (no `wss://`); no exponer el WebSocket fuera
-  de la red local y rotar el código al detectar intentos fallidos repetidos.
+- Tráfico:
+  - **Server → client**: eventos del motor (`status`, `level`, `dsp`, …).
+  - **Client → server**: comandos `stop`, `setPreset`, `setGlobalBypass`,
+    `setLinkBypass` y `setEqBand` (JSON con `tag = "type"`). `start` se rechaza.
+- Comandos malformados o fallidos se responden con un evento `warning` dirigido
+  al cliente que los envió.
+- Límites de entrada (seguridad): mensajes ≤ 1 KB; ganancia del EQ acotada a
+  `[-18, 18]` dB; el resto de campos los valida el motor (índices, nombres de
+  módulo, preset).
+- Seguridad: el token equivale a **mando remoto** (puede detener el motor y
+  reconfigurar la cadena). Cifrado local `ws://` (no `wss://`); no exponer el
+  WebSocket fuera de la red local y rotar el código al detectar intentos
+  fallidos repetidos.

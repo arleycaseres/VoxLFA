@@ -73,15 +73,21 @@ Objetivo: la IA analiza la voz y sugiere ajustes sin fricción.
 - [x] Aplicación de sugerencias con confirmación (`apply_suggestion`: aplica el
       preset sugerido en vivo) y resumen de sesión exportable a JSON.
 - [x] El móvil muestra el análisis y las sugerencias en modo solo lectura.
-- [ ] Control del motor desde el móvil (con autenticación mutua de dispositivos).
+- [x] Control del motor desde el móvil (bloque 5): detener el motor, cambiar
+      preset, bypass global/por módulo y ajustar el EQ por banda, ejecutados por
+      el WebSocket contra el mismo gestor que la cabina. Autenticado con el
+      código de emparejamiento (equivale a **mando remoto**); `start` queda
+      reservado a la cabina de escritorio.
 
 Entregable: la cabina muestra métricas de voz en vivo (brillo, resonancia,
 fatiga, dinámica), sugiere ajustes con botón "Aplicar" que reconfigura la cadena
 en vivo, y permite exportar el resumen de la sesión a JSON. El móvil refleja el
-análisis en modo monitoreo.
+análisis y controla el motor de forma remota (stop, preset, bypass y EQ).
 
-> Pendiente de la Fase 2: el bloque 5 (control del motor desde el móvil con
-> autenticación mutua) se dejó fuera de esta tanda por decisión de producto.
+> Bloque 5 de la Fase 2 entregado: el móvil pasa de solo lectura a control
+> remoto del motor usando el código de emparejamiento como mando (se descartó la
+> autenticación mutua por dispositivo por decisión de producto; ver
+> `docs/seguridad.md`).
 
 ## Fase 3 — Persistencia y perfiles por dispositivo ✅
 

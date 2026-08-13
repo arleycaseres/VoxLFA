@@ -6,7 +6,8 @@
 //!    (arrancar/detener, estado compartido, difusión de eventos).
 //! 2. **`pairing`** — código de emparejamiento para la app móvil.
 //! 3. **`ws`** — servidor WebSocket local que difunde los eventos del motor al
-//!    móvil (autenticado por el código de emparejamiento).
+//!    móvil y recibe sus comandos de control (autenticado por el código de
+//!    emparejamiento).
 //!
 //! Con el feature `webview` (por defecto) se añade la integración Tauri:
 //! comandos para la UI y la ventana de escritorio.
