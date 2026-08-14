@@ -15,6 +15,7 @@ import type {
   EngineEvent,
   EngineStatus,
   LevelSample,
+  NoiseGateParams,
   PresetId,
   PresetInfo,
   SessionSummary,
@@ -135,6 +136,11 @@ export function setEqBand(bandIndex: number, gainDb: number): Promise<void> {
   return inTauri()
     ? invoke<void>("set_eq_band", { bandIndex, gainDb })
     : mock.setEqBand(bandIndex, gainDb);
+}
+
+/** Ajusta los parámetros de la puerta de ruido del preset activo en vivo. */
+export function setNoiseGate(params: NoiseGateParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_noise_gate", { params }) : mock.setNoiseGate(params);
 }
 
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */

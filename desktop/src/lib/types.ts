@@ -94,6 +94,24 @@ export interface EqBand {
 /** Tipo de banda del ecualizador. */
 export type EqBandKind = "lowShelf" | "peaking" | "highShelf";
 
+/**
+ * Parámetros de la puerta de ruido (espejo de `core/src/protocol/dsp.rs`).
+ * Se transportan en el estado del eslabón `noisegate` y en el comando
+ * `set_noise_gate`.
+ */
+export interface NoiseGateParams {
+  /** Umbral (dBFS) a partir del cual se abre la puerta. */
+  thresholdDb: number;
+  /** Tiempo de ataque (ms): qué rápido se abre. */
+  attackMs: number;
+  /** Tiempo de liberación (ms): qué rápido se cierra. */
+  releaseMs: number;
+  /** Tiempo que permanece abierta tras caer bajo el umbral (ms). */
+  holdMs: number;
+  /** Atenuación máxima aplicada al cerrar (dB). */
+  rangeDb: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   /** Nombre corto del módulo (identificador para el bypass). */
@@ -104,6 +122,8 @@ export interface DspLinkState {
   bypass: boolean;
   /** Bandas actuales del EQ si este módulo es el ecualizador; si no, `null`. */
   eqBands: EqBand[] | null;
+  /** Parámetros del gate si este módulo es la puerta de ruido; si no, `null`. */
+  gateParams: NoiseGateParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */

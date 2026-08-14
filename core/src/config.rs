@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::{EqBand, PresetId};
+use crate::protocol::{EqBand, NoiseGateParams, PresetId};
 use crate::Result;
 
 /// Clave de perfil cuando se arranca con el dispositivo predeterminado.
@@ -56,6 +56,10 @@ pub struct DeviceProfile {
     /// Ajuste fino del EQ (bandas actuales) para el preset de este perfil.
     #[serde(default)]
     pub eq_bands: Vec<EqBand>,
+    /// Parámetros de la puerta de ruido si el preset de este perfil la tiene y
+    /// se ajustaron en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub gate_params: Option<NoiseGateParams>,
     /// `true` si el bypass global estaba activo al guardar.
     #[serde(default)]
     pub global_bypass: bool,
@@ -85,6 +89,7 @@ impl AppConfig {
             device_key: device_key.to_string(),
             preset: PresetId::default(),
             eq_bands: Vec::new(),
+            gate_params: None,
             global_bypass: false,
             link_bypass: HashMap::new(),
         });
@@ -203,6 +208,13 @@ mod tests {
             let profile = config.profile_mut("Micrófono (USB Audio)");
             profile.preset = PresetId::VozLimpia;
             profile.eq_bands = vec![band(EqBandKind::Peaking, 3000.0, 3.5)];
+            profile.gate_params = Some(NoiseGateParams {
+                threshold_db: -52.0,
+                attack_ms: 2.0,
+                release_ms: 90.0,
+                hold_ms: 20.0,
+                range_db: 40.0,
+            });
             profile.global_bypass = false;
             profile.link_bypass.insert("reverb".into(), true);
         }
@@ -224,6 +236,7 @@ mod tests {
             .expect("perfil cargado");
         assert_eq!(profile.preset, PresetId::VozLimpia);
         assert_eq!(profile.eq_bands[0].gain_db, 3.5);
+        assert_eq!(profile.gate_params.map(|p| p.threshold_db), Some(-52.0));
         assert_eq!(profile.link_bypass.get("reverb"), Some(&true));
 
         let _ = std::fs::remove_file(&path);
@@ -263,6 +276,7 @@ mod tests {
         assert!(json.contains("\"deviceKey\":\"mic\""));
         assert!(json.contains("\"preset\":\"warm\""));
         assert!(json.contains("\"eqBands\":[]"));
+        assert!(json.contains("\"gateParams\":null"));
         assert!(json.contains("\"globalBypass\":false"));
         assert!(json.contains("\"linkBypass\":{}"));
     }

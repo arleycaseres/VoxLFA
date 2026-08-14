@@ -17,6 +17,7 @@ import type {
   EngineStatus,
   EqBand,
   LevelSample,
+  NoiseGateParams,
   PresetId,
   PresetInfo,
   SessionSummary,
@@ -74,9 +75,17 @@ const FAKE_PRESETS: PresetInfo[] = [
 /** Nombres de módulo por preset (espejo de `PresetFactory::specs`). */
 const PRESET_LINKS: Record<PresetId, string[]> = {
   dry: [],
-  vozLimpia: ["highpass", "boomsuppressor", "eq", "deesser", "compressor", "limiter"],
-  radio: ["highpass", "notch", "eq", "saturator", "compressor", "limiter"],
-  warm: ["highpass", "boomsuppressor", "eq", "compressor", "reverb", "limiter"],
+  vozLimpia: ["highpass", "noisegate", "boomsuppressor", "eq", "deesser", "compressor", "limiter"],
+  radio: ["highpass", "noisegate", "notch", "eq", "saturator", "compressor", "limiter"],
+  warm: ["highpass", "noisegate", "boomsuppressor", "eq", "compressor", "reverb", "limiter"],
+};
+
+/** Parámetros de la puerta de ruido por preset (espejo del core). */
+const PRESET_GATE: Record<PresetId, NoiseGateParams | null> = {
+  dry: null,
+  vozLimpia: { thresholdDb: -50, attackMs: 2, releaseMs: 100, holdMs: 25, rangeDb: 40 },
+  radio: { thresholdDb: -45, attackMs: 1, releaseMs: 80, holdMs: 15, rangeDb: 45 },
+  warm: { thresholdDb: -48, attackMs: 3, releaseMs: 120, holdMs: 30, rangeDb: 40 },
 };
 
 /** Bandas del EQ por preset (espejo de los presets del core). */
@@ -188,6 +197,7 @@ function buildDspState(preset: PresetId): DspState {
     enabled: true,
     bypass: false,
     eqBands: name === "eq" ? PRESET_EQ[preset] : null,
+    gateParams: name === "noisegate" ? PRESET_GATE[preset] : null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -566,6 +576,17 @@ export function setEqBand(bandIndex: number, gainDb: number): Promise<void> {
             ),
           }
         : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setNoiseGate(params: NoiseGateParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "noisegate" ? { ...item, gateParams: params } : item,
     ),
   };
   syncDsp();

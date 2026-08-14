@@ -60,6 +60,29 @@ Objetivo: ajustar el EQ por banda, en vivo y sin reiniciar el motor.
 > Los ajustes finos se aplican **en vivo** y (desde la Fase 3) se guardan por
 > dispositivo de entrada para reaplicarlos al reiniciar.
 
+## Fase 1.2 — Puerta de ruido configurable ✅
+
+Objetivo: silenciar el ruido de fondo del micrófono entre frases con una puerta
+de ruido ajustable en vivo (ítem "Noise Gate" de la Fase 1 del plan).
+
+- [x] Módulo `NoiseGate` en `voxlfa-core` (`dsp/gate.rs`): umbral, ataque,
+      liberación, *hold* y rango; envolvente pico con ataque/liberación por
+      muestra, decisión abierta/cerrada con *hold* y ganancia suavizada en dB
+      (sin *zipper noise*). Arranca cerrada y no asigna memoria en el callback.
+- [x] Insertado en la cadena tras el pasa-altos en los presets de voz
+      (vozLimpia, radio, warm); `dry` no lo incluye.
+- [x] Protocolo: `NoiseGateParams` en el estado del eslabón (`gateParams`),
+      variante de preset `DspModuleKind::NoiseGate` y comando
+      `set_noise_gate` (reconstruye la puerta en el hilo de control y la
+      conmuta en vivo, sin reiniciar el motor).
+- [x] Cabina: panel "Puerta de ruido" con sliders de umbral (−80…−20 dB),
+      rango (6…60 dB), ataque (0…20 ms) y liberación (20…500 ms); el *hold* se
+      muestra en solo lectura (lo fija el preset).
+- [x] El móvil refleja los parámetros en modo solo lectura.
+- [x] Persistencia: el perfil por dispositivo guarda `gateParams` y los reaplica
+      al arrancar (igual que el EQ fino).
+- [x] Verificación completa (fmt, clippy, tests, builds desktop y móvil).
+
 ## Fase 2 — IA: asistente vocal ✅ (bloques 1-4)
 
 Objetivo: la IA analiza la voz y sugiere ajustes sin fricción.

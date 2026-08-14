@@ -228,3 +228,93 @@ fn set_eq_bands_rejects_preset_without_eq() {
     let dry = DspHandle::new(cmd_tx, event_tx, PresetId::Dry, 48_000, 256);
     assert!(dry.set_eq_bands(vec![]).is_err());
 }
+
+#[test]
+fn gate_link_exposes_params_from_the_preset() {
+    for preset in [PresetId::VozLimpia, PresetId::Radio, PresetId::Warm] {
+        let chain = ChainProcessor::new(preset, 48_000, 256);
+        let state = chain.state();
+        let gate = state
+            .links
+            .iter()
+            .find(|link| link.name == "noisegate")
+            .expect("los presets de voz incluyen puerta de ruido");
+        let params = gate
+            .gate_params
+            .as_ref()
+            .expect("el eslabón gate lleva sus parámetros");
+        assert!(params.threshold_db < 0.0);
+        assert!(params.range_db > 0.0);
+    }
+
+    // Dry no tiene gate.
+    let dry = ChainProcessor::new(PresetId::Dry, 48_000, 256);
+    assert!(dry
+        .state()
+        .links
+        .iter()
+        .all(|link| link.gate_params.is_none()));
+}
+
+#[test]
+fn set_noise_gate_rebuilds_the_gate_and_emits_new_state() {
+    use voxlfa_core::protocol::NoiseGateParams;
+
+    let (cmd_tx, cmd_rx) = mpsc::channel::<DspCommand>();
+    let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
+    let handle = DspHandle::new(cmd_tx, event_tx, PresetId::VozLimpia, 48_000, 256);
+
+    let params = NoiseGateParams {
+        threshold_db: -55.0,
+        attack_ms: 4.0,
+        release_ms: 120.0,
+        hold_ms: 30.0,
+        range_db: 35.0,
+    };
+    handle.set_noise_gate(params).unwrap();
+
+    // El hilo de audio recibe el gate nuevo ya construido con los parámetros.
+    match cmd_rx.recv().unwrap() {
+        DspCommand::SetLinkGate { processor, params } => {
+            assert_eq!(processor.name(), "noisegate");
+            assert_eq!(params.threshold_db, -55.0);
+            assert_eq!(params.range_db, 35.0);
+        }
+        _ => panic!("esperaba SetLinkGate"),
+    }
+
+    // Se emite un evento `dsp` con el estado actualizado.
+    match event_rx.recv().unwrap() {
+        EngineEvent::Dsp(state) => {
+            let gate = state
+                .links
+                .iter()
+                .find(|link| link.name == "noisegate")
+                .expect("hay eslabón noisegate");
+            assert_eq!(
+                gate.gate_params.unwrap().threshold_db,
+                -55.0,
+                "el espejo refleja el umbral ajustado"
+            );
+        }
+        other => panic!("esperaba Dsp, obtuve {other:?}"),
+    }
+}
+
+#[test]
+fn set_noise_gate_rejects_preset_without_gate() {
+    use voxlfa_core::protocol::NoiseGateParams;
+
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<DspCommand>();
+    let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>();
+    let dry = DspHandle::new(cmd_tx, event_tx, PresetId::Dry, 48_000, 256);
+    assert!(dry
+        .set_noise_gate(NoiseGateParams {
+            threshold_db: -50.0,
+            attack_ms: 2.0,
+            release_ms: 80.0,
+            hold_ms: 20.0,
+            range_db: 40.0,
+        })
+        .is_err());
+}

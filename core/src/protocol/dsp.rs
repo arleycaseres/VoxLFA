@@ -60,6 +60,25 @@ pub enum EqBandKind {
     HighShelf,
 }
 
+/// Parámetros de la puerta de ruido (espejo de `dsp::gate::NoiseGate`).
+///
+/// Se transportan en `DspModuleKind::NoiseGate` (configuración del preset) y en
+/// `DspLinkState::gate_params` (estado actual, tras los ajustes en vivo).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoiseGateParams {
+    /// Umbral (dBFS) a partir del cual se abre la puerta.
+    pub threshold_db: f32,
+    /// Tiempo de ataque (ms): qué rápido se abre.
+    pub attack_ms: f32,
+    /// Tiempo de liberación (ms): qué rápido se cierra.
+    pub release_ms: f32,
+    /// Tiempo que permanece abierta tras caer bajo el umbral (ms).
+    pub hold_ms: f32,
+    /// Atenuación máxima aplicada al cerrar (dB).
+    pub range_db: f32,
+}
+
 /// Tipo de módulo de la cadena DSP con sus parámetros.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -98,6 +117,19 @@ pub enum DspModuleKind {
     Eq {
         /// Bandas activas, en orden de aplicación.
         bands: Vec<EqBand>,
+    },
+    /// Puerta de ruido: atenúa la señal bajo el umbral.
+    NoiseGate {
+        /// Umbral (dBFS) a partir del cual se abre la puerta.
+        threshold_db: f32,
+        /// Tiempo de ataque (ms).
+        attack_ms: f32,
+        /// Tiempo de liberación (ms).
+        release_ms: f32,
+        /// Tiempo que permanece abierta tras caer bajo el umbral (ms).
+        hold_ms: f32,
+        /// Atenuación máxima aplicada al cerrar (dB).
+        range_db: f32,
     },
     /// Compresor de dinámica.
     Compressor {
@@ -180,6 +212,9 @@ pub struct DspLinkState {
     /// Bandas actuales del ecualizador si este módulo es el EQ; `None` en los
     /// demás módulos. Refleja los ajustes finos aplicados con `set_eq_band`.
     pub eq_bands: Option<Vec<EqBand>>,
+    /// Parámetros actuales de la puerta de ruido si este módulo es el gate;
+    /// `None` en los demás. Refleja los ajustes en vivo con `set_noise_gate`.
+    pub gate_params: Option<NoiseGateParams>,
 }
 
 /// Estado completo de la cadena DSP activa.

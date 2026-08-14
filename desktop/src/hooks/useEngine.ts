@@ -12,6 +12,7 @@ import type {
   EngineEvent,
   EngineStatus,
   LevelSample,
+  NoiseGateParams,
   PresetId,
   PresetInfo,
   SessionSummary,
@@ -35,6 +36,7 @@ import {
   setEqBand,
   setGlobalBypass,
   setLinkBypass,
+  setNoiseGate,
   startEngine,
   stopEngine,
   type PairingInfo,
@@ -86,6 +88,8 @@ export interface EngineController {
   setLinkBypass: (link: string, bypass: boolean) => Promise<void>;
   /** Ajusta la ganancia de una banda del EQ del preset activo en vivo. */
   setEqBand: (bandIndex: number, gainDb: number) => Promise<void>;
+  /** Ajusta los parámetros de la puerta de ruido del preset activo en vivo. */
+  setNoiseGate: (params: NoiseGateParams) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
@@ -175,6 +179,14 @@ export function useEngine(): EngineController {
   const setEqBandAction = useCallback(async (bandIndex: number, gainDb: number) => {
     try {
       await setEqBand(bandIndex, gainDb);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setNoiseGateAction = useCallback(async (params: NoiseGateParams) => {
+    try {
+      await setNoiseGate(params);
     } catch (err) {
       setError(String(err));
     }
@@ -303,6 +315,7 @@ export function useEngine(): EngineController {
     setGlobalBypass: setGlobalBypassAction,
     setLinkBypass: setLinkBypassAction,
     setEqBand: setEqBandAction,
+    setNoiseGate: setNoiseGateAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
   };

@@ -14,6 +14,7 @@ import { PairingBadge } from "./components/PairingBadge";
 import { PresetCard } from "./components/PresetCard";
 import { DspChain } from "./components/DspChain";
 import { EqPanel } from "./components/EqPanel";
+import { GatePanel } from "./components/GatePanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
 import { SpectrumView } from "./components/SpectrumView";
 import { formatLatency, formatSampleRate } from "./lib/format";
@@ -140,6 +141,13 @@ export default function App() {
             dsp={engine.dsp}
             running={running}
             onSetEqBand={(index, gainDb) => void engine.setEqBand(index, gainDb)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Puerta de ruido</h2>
+          <GatePanel
+            dsp={engine.dsp}
+            running={running}
+            onSetNoiseGate={(params) => void engine.setNoiseGate(params)}
           />
 
           {engine.error && <p className="controls__error">{engine.error}</p>}

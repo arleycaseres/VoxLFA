@@ -196,6 +196,7 @@ fn engine_event_dsp_serializes_with_type_tag() {
                 gain_db: 2.0,
                 q: 1.5,
             }]),
+            gate_params: None,
         }],
     });
 

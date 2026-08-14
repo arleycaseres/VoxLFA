@@ -262,6 +262,35 @@ export function MonitorView({ status, level, spectrum, dsp, analysis }: MonitorV
         )}
       </View>
 
+      {/* Puerta de ruido del preset activo (solo lectura) */}
+      <View style={styles.infoCard}>
+        <Text style={styles.cardTitle}>PUERTA DE RUIDO</Text>
+        {!dsp ? (
+          <Text style={styles.emptyText}>Sin datos de la puerta de ruido.</Text>
+        ) : (
+          (() => {
+            const gate = dsp.links.find((link) => link.name === "noisegate");
+            const params = gate?.gateParams ?? null;
+            if (!params) {
+              return (
+                <Text style={styles.emptyText}>
+                  El preset activo no tiene puerta de ruido.
+                </Text>
+              );
+            }
+            return (
+              <View style={styles.gateGrid}>
+                <Metric label="Umbral" value={`${params.thresholdDb.toFixed(0)} dB`} />
+                <Metric label="Rango" value={`${params.rangeDb.toFixed(0)} dB`} />
+                <Metric label="Ataque" value={`${params.attackMs.toFixed(1)} ms`} />
+                <Metric label="Liberación" value={`${params.releaseMs.toFixed(0)} ms`} />
+                <Metric label="Hold" value={`${params.holdMs.toFixed(0)} ms`} />
+              </View>
+            );
+          })()
+        )}
+      </View>
+
       {/* Asistente vocal (solo lectura: el control es del escritorio) */}
       <View style={styles.infoCard}>
         <Text style={styles.cardTitle}>ASISTENTE</Text>
@@ -571,6 +600,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "monospace",
     fontWeight: "700",
+  },
+  gateGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
   metricCell: {
     flexGrow: 1,

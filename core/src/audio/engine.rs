@@ -301,6 +301,9 @@ impl AudioEngine {
                             } => {
                                 chain.set_link_processor(&name, processor, eq_bands);
                             }
+                            DspCommand::SetLinkGate { processor, params } => {
+                                chain.set_link_gate(processor, params);
+                            }
                         }
                     }
 

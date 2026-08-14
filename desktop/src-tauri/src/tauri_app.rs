@@ -246,6 +246,16 @@ fn set_eq_band(state: State<AppState>, band_index: usize, gain_db: f32) -> Resul
         .map_err(|err| err.to_string())
 }
 
+/// Ajusta los parámetros de la puerta de ruido del preset activo en vivo.
+#[tauri::command]
+fn set_noise_gate(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::NoiseGateParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.set_noise_gate(params).map_err(|err| err.to_string())
+}
+
 /// Devuelve la configuración persistida (para precargar la cabina).
 #[tauri::command]
 fn get_config(state: State<AppState>) -> Result<AppConfig, String> {
@@ -287,6 +297,7 @@ pub fn run() {
             set_global_bypass,
             set_link_bypass,
             set_eq_band,
+            set_noise_gate,
             get_config,
             get_analysis,
             get_session_summary,

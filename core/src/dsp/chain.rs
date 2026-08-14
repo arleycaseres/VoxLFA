@@ -11,12 +11,13 @@
 use std::sync::{mpsc, Arc, Mutex};
 
 use crate::dsp::{
-    AudioProcessor, BoomSuppressor, Compressor, DeEsser, Delay, Gain, HighPass, Limiter, Notch,
-    ParametricEq, ProcessResult, ProcessingInfo, Reverb, Saturator,
+    AudioProcessor, BoomSuppressor, Compressor, DeEsser, Delay, Gain, HighPass, Limiter, NoiseGate,
+    Notch, ParametricEq, ProcessResult, ProcessingInfo, Reverb, Saturator,
 };
 use crate::error::Error;
 use crate::protocol::{
-    DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent, EqBand, PresetId,
+    DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent, EqBand, NoiseGateParams,
+    PresetId,
 };
 use crate::Result;
 
@@ -35,6 +36,9 @@ struct ChainLink {
     /// Bandas actuales del EQ si este eslabón es el ecualizador; `None` si no.
     /// Se reemplaza junto con el procesador en los ajustes finos.
     eq_bands: Option<Vec<EqBand>>,
+    /// Parámetros actuales de la puerta de ruido si este eslabón es el gate;
+    /// `None` si no. Se reemplaza junto con el procesador en los ajustes en vivo.
+    gate_params: Option<NoiseGateParams>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -79,12 +83,14 @@ impl ChainProcessor {
             .into_iter()
             .map(|spec| {
                 let eq_bands = eq_bands_of(&spec.kind);
+                let gate_params = gate_params_of(&spec.kind);
                 ChainLink {
                     name: module_name(&spec.kind),
                     enabled: spec.enabled,
                     bypass: false,
                     processor: build_processor(spec, self.sample_rate, self.max_frames),
                     eq_bands,
+                    gate_params,
                 }
             })
             .collect();
@@ -131,6 +137,26 @@ impl ChainProcessor {
         }
     }
 
+    /// Reemplaza el procesador de la puerta de ruido por uno ya construido.
+    ///
+    /// Igual que [`ChainProcessor::set_link_processor`], pero además actualiza
+    /// los parámetros del gate en el estado. Devuelve `true` si el módulo
+    /// existe y se actualizó.
+    pub fn set_link_gate(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: NoiseGateParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "noisegate") {
+            Some(link) => {
+                link.processor = processor;
+                link.gate_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -144,6 +170,7 @@ impl ChainProcessor {
                     enabled: link.enabled,
                     bypass: link.bypass,
                     eq_bands: link.eq_bands.clone(),
+                    gate_params: link.gate_params,
                 })
                 .collect(),
         }
@@ -229,6 +256,14 @@ pub enum DspCommand {
         /// Bandas del EQ si el módulo reemplazado es el ecualizador; `None` si no.
         eq_bands: Option<Vec<EqBand>>,
     },
+    /// Reemplazar el procesador de la puerta de ruido (ajuste en vivo de sus
+    /// parámetros). El hilo de audio solo intercambia el puntero.
+    SetLinkGate {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales del gate para el estado de la cadena.
+        params: NoiseGateParams,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -267,6 +302,7 @@ impl DspHandle {
                     enabled: spec.enabled,
                     bypass: false,
                     eq_bands: eq_bands_of(&spec.kind),
+                    gate_params: gate_params_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -366,6 +402,37 @@ impl DspHandle {
         self.set_eq_bands(bands)
     }
 
+    /// Ajusta los parámetros de la puerta de ruido del preset activo en vivo.
+    ///
+    /// El nuevo `NoiseGate` se construye aquí (hilo de control) con los
+    /// parámetros indicados y se envía ya listo al hilo de audio, que solo
+    /// intercambia el puntero. Devuelve error si el preset actual no tiene
+    /// puerta de ruido.
+    pub fn set_noise_gate(&self, params: NoiseGateParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "noisegate")
+            .ok_or_else(|| Error::audio("el preset actual no tiene puerta de ruido"))?;
+        link.gate_params = Some(params);
+
+        let processor = NoiseGate::new(
+            params.threshold_db,
+            params.attack_ms,
+            params.release_ms,
+            params.hold_ms,
+            params.range_db,
+            self.sample_rate,
+        );
+        self.send(DspCommand::SetLinkGate {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -398,6 +465,7 @@ fn module_name(kind: &DspModuleKind) -> &'static str {
         DspModuleKind::Notch { .. } => "notch",
         DspModuleKind::BoomSuppressor { .. } => "boomsuppressor",
         DspModuleKind::Eq { .. } => "eq",
+        DspModuleKind::NoiseGate { .. } => "noisegate",
         DspModuleKind::Compressor { .. } => "compressor",
         DspModuleKind::DeEsser { .. } => "deesser",
         DspModuleKind::Saturator { .. } => "saturator",
@@ -411,6 +479,27 @@ fn module_name(kind: &DspModuleKind) -> &'static str {
 fn eq_bands_of(kind: &DspModuleKind) -> Option<Vec<EqBand>> {
     match kind {
         DspModuleKind::Eq { bands } => Some(bands.clone()),
+        _ => None,
+    }
+}
+
+/// Parámetros de la puerta de ruido de una especificación de módulo, o `None`
+/// si no es un gate.
+fn gate_params_of(kind: &DspModuleKind) -> Option<NoiseGateParams> {
+    match kind {
+        DspModuleKind::NoiseGate {
+            threshold_db,
+            attack_ms,
+            release_ms,
+            hold_ms,
+            range_db,
+        } => Some(NoiseGateParams {
+            threshold_db: *threshold_db,
+            attack_ms: *attack_ms,
+            release_ms: *release_ms,
+            hold_ms: *hold_ms,
+            range_db: *range_db,
+        }),
         _ => None,
     }
 }
@@ -436,6 +525,20 @@ fn build_processor(
             sample_rate,
         )),
         DspModuleKind::Eq { bands } => Box::new(ParametricEq::new(bands, sample_rate, max_frames)),
+        DspModuleKind::NoiseGate {
+            threshold_db,
+            attack_ms,
+            release_ms,
+            hold_ms,
+            range_db,
+        } => Box::new(NoiseGate::new(
+            threshold_db,
+            attack_ms,
+            release_ms,
+            hold_ms,
+            range_db,
+            sample_rate,
+        )),
         DspModuleKind::Compressor {
             threshold_db,
             ratio,

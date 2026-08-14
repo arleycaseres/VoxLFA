@@ -83,8 +83,21 @@ mensajes JSON por el WebSocket para el móvil.
   "preset": "vozLimpia",
   "globalBypass": false,
   "links": [
-    { "name": "highpass",       "enabled": true, "bypass": false, "eqBands": null },
-    { "name": "boomsuppressor", "enabled": true, "bypass": false, "eqBands": null },
+    { "name": "highpass",  "enabled": true, "bypass": false, "eqBands": null, "gateParams": null },
+    {
+      "name": "noisegate",
+      "enabled": true,
+      "bypass": false,
+      "eqBands": null,
+      "gateParams": {
+        "thresholdDb": -50,
+        "attackMs": 2,
+        "releaseMs": 100,
+        "holdMs": 25,
+        "rangeDb": 40
+      }
+    },
+    { "name": "boomsuppressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null },
     {
       "name": "eq",
       "enabled": true,
@@ -93,11 +106,12 @@ mensajes JSON por el WebSocket para el móvil.
         { "kind": "lowShelf", "freqHz": 200,  "gainDb": -2,   "q": 0.8 },
         { "kind": "peaking",  "freqHz": 3000, "gainDb": 2,    "q": 1.5 },
         { "kind": "highShelf","freqHz": 8000, "gainDb": 1.5,  "q": 0.8 }
-      ]
+      ],
+      "gateParams": null
     },
-    { "name": "deesser",        "enabled": true, "bypass": false, "eqBands": null },
-    { "name": "compressor",     "enabled": true, "bypass": false, "eqBands": null },
-    { "name": "limiter",        "enabled": true, "bypass": false, "eqBands": null }
+    { "name": "deesser",    "enabled": true, "bypass": false, "eqBands": null, "gateParams": null },
+    { "name": "compressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null },
+    { "name": "limiter",    "enabled": true, "bypass": false, "eqBands": null, "gateParams": null }
   ]
 }
 ```
@@ -111,6 +125,10 @@ mensajes JSON por el WebSocket para el móvil.
 - `eqBands`: solo lo lleva el módulo `eq`; es la configuración **actual** del
   ecualizador (bandas, frecuencias, ganancias y Q), que cambia con el comando
   `set_eq_band`. Los demás módulos lo envían a `null`.
+- `gateParams`: solo lo lleva el módulo `noisegate`; es la configuración
+  **actual** de la puerta de ruido (umbral, ataque, liberación, *hold* y rango),
+  que cambia con el comando `set_noise_gate`. Los demás módulos lo envían a
+  `null`. El móvil lo muestra en solo lectura (no lo ajusta).
 - `latencyMs` (ver evento `status`) ya **incluye** la latencia propia de la
   cadena (p. ej. el limiter suma su lookahead).
 
@@ -237,15 +255,16 @@ campos en camelCase:
 | `set_global_bypass` | `{ bypass: boolean }` | `DspState` |
 | `set_link_bypass` | `{ name: string, bypass: boolean }` | `DspState` |
 | `set_eq_band` | `{ bandIndex: number, gainDb: number }` | `DspState` |
+| `set_noise_gate` | `{ params: NoiseGateParams }` | `DspState` |
 | `get_analysis` | — | `AnalysisSample \| null` |
 | `get_session_summary` | — | `SessionSummary \| null` |
 | `apply_suggestion` | `{ suggestionId: number }` | — |
 | `get_pairing_info` | — | `{ code, port, lanAddress }` |
 
 - `bufferSize` en `start_engine` es opcional (`null` → heurística automática).
-- Los nombres de módulo de la cadena incluyen: `gain`, `highpass`, `notch`,
-  `boomsuppressor`, `eq`, `compressor`, `deesser`, `saturator`, `delay`,
-  `reverb`, `limiter`.
+- Los nombres de módulo de la cadena incluyen: `gain`, `highpass`, `noisegate`,
+  `notch`, `boomsuppressor`, `eq`, `compressor`, `deesser`, `saturator`,
+  `delay`, `reverb`, `limiter`.
 
 ## Configuración persistida (solo escritorio)
 
@@ -265,6 +284,13 @@ móvil: solo lo consume la cabina para precargar los selectores.
       "eqBands": [
         { "kind": "lowShelf", "freqHz": 120, "gainDb": 3, "q": 0.8 }
       ],
+      "gateParams": {
+        "thresholdDb": -48,
+        "attackMs": 3,
+        "releaseMs": 120,
+        "holdMs": 30,
+        "rangeDb": 40
+      },
       "globalBypass": false,
       "linkBypass": { "reverb": true }
     }
@@ -276,8 +302,10 @@ móvil: solo lo consume la cabina para precargar los selectores.
   nombre del dispositivo, o `"default"` si se usó el predeterminado del
   sistema).
 - Al arrancar el motor con un dispositivo con perfil, se aplican su preset,
-  sus `eqBands` y sus bypasses. `apply_preset`/`set_*_bypass` persisten al
-  instante; el ajuste fino del EQ (`set_eq_band`) se vuelca al detener el motor.
+  sus `eqBands`, sus `gateParams` y sus bypasses.
+  `apply_preset`/`set_*_bypass` persisten al instante; el ajuste fino del EQ
+  (`set_eq_band`) y de la puerta de ruido (`set_noise_gate`) se vuelcan al
+  detener el motor.
 - Archivo tolerante a fallos: si falta o está corrupto se parte de la
   configuración vacía.
 
@@ -286,6 +314,10 @@ móvil: solo lo consume la cabina para precargar los selectores.
 - `set_eq_band` ajusta en vivo la ganancia de la banda `bandIndex` (0-based) del
   ecualizador del preset activo; emite un evento `dsp` con las bandas nuevas.
   Devuelve error si el preset no tiene EQ o el índice está fuera de rango.
+- `set_noise_gate` ajusta en vivo los parámetros de la puerta de ruido del
+  preset activo (solo Tauri: el móvil es de solo lectura); emite un evento `dsp`
+  con los `gateParams` nuevos. Devuelve error si el preset no tiene puerta de
+  ruido. Los valores se acotan en el motor a las ventanas de la cabina.
 - Estos cuatro comandos exigen el motor **en marcha**; si está detenido devuelven
   error (`EngineNotRunning`). `get_dsp_state` no exige motor en marcha.
 - `get_analysis` devuelve la última muestra de análisis (incluida la de la

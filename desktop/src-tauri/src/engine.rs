@@ -21,7 +21,7 @@ use voxlfa_core::audio::{AudioEngine, AudioEngineConfig, DspHandle, EngineHandle
 use voxlfa_core::config::{ConfigStore, DEFAULT_DEVICE_KEY};
 use voxlfa_core::dsp::PresetFactory;
 use voxlfa_core::protocol::{
-    DspState, EngineEvent, EngineStatus, LevelSample, PresetId, SpectrumSample,
+    DspState, EngineEvent, EngineStatus, LevelSample, NoiseGateParams, PresetId, SpectrumSample,
 };
 
 /// Errores del gestor del motor.
@@ -168,10 +168,14 @@ impl EngineManager {
         let (tx, rx) = mpsc::channel();
         let (handle, dsp, analysis) = AudioEngine::start(engine_config, tx)?;
 
-        // Reaplicar el ajuste fino del EQ y los bypasses persistidos.
+        // Reaplicar el ajuste fino del EQ, la puerta de ruido y los bypasses
+        // persistidos.
         if let Some(profile) = profile {
             if !profile.eq_bands.is_empty() {
                 let _ = dsp.set_eq_bands(profile.eq_bands);
+            }
+            if let Some(gate) = profile.gate_params {
+                let _ = dsp.set_noise_gate(gate);
             }
             if profile.global_bypass {
                 let _ = dsp.set_global_bypass(true);
@@ -262,6 +266,11 @@ impl EngineManager {
                         .find(|link| link.name == "eq")
                         .and_then(|link| link.eq_bands.clone())
                         .unwrap_or_default();
+                    profile.gate_params = state
+                        .links
+                        .iter()
+                        .find(|link| link.name == "noisegate")
+                        .and_then(|link| link.gate_params);
                     profile.link_bypass = state
                         .links
                         .iter()
@@ -291,6 +300,7 @@ impl EngineManager {
         self.update_current_profile(|profile| {
             profile.preset = preset;
             profile.eq_bands = PresetFactory::eq_bands(preset);
+            profile.gate_params = PresetFactory::gate_params(preset);
             profile.global_bypass = false;
             profile.link_bypass.clear();
         });
@@ -333,6 +343,19 @@ impl EngineManager {
             if let Some(band) = profile.eq_bands.get_mut(index) {
                 band.gain_db = gain_db;
             }
+        });
+        Ok(())
+    }
+
+    /// Ajusta los parámetros de la puerta de ruido del preset activo en vivo.
+    ///
+    /// El perfil se actualiza en memoria (se vuelca al detener el motor, para
+    /// no escribir el archivo en cada paso del slider).
+    pub fn set_noise_gate(&mut self, params: NoiseGateParams) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_noise_gate(params)?;
+        self.update_current_profile(|profile| {
+            profile.gate_params = Some(params);
         });
         Ok(())
     }

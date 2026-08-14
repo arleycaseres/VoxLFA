@@ -65,6 +65,20 @@ export interface EqBand {
 /** Tipo de banda del ecualizador. */
 export type EqBandKind = "lowShelf" | "peaking" | "highShelf";
 
+/** Parámetros de la puerta de ruido de la cadena. */
+export interface NoiseGateParams {
+  /** Umbral de cierre en dBFS. */
+  thresholdDb: number;
+  /** Tiempo de ataque (ms). */
+  attackMs: number;
+  /** Tiempo de liberación (ms). */
+  releaseMs: number;
+  /** Tiempo de retención de la apertura (ms). */
+  holdMs: number;
+  /** Atenuación máxima cuando la puerta está cerrada (dB). */
+  rangeDb: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -72,6 +86,8 @@ export interface DspLinkState {
   bypass: boolean;
   /** Bandas actuales del EQ si este módulo es el ecualizador; si no, `null`. */
   eqBands: EqBand[] | null;
+  /** Parámetros actuales de la puerta si este módulo es la puerta; si no, `null`. */
+  gateParams: NoiseGateParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */

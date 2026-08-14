@@ -6,9 +6,11 @@ remoto); la **Fase 1** añade el DSP real: una cadena encadenable de módulos
 vocal (EQ, compresor, de-esser, saturación, delay, reverb, limiter, pasa-altos,
 ganancia) con presets aplicables en vivo, bypass por módulo y global, y niveles
 de salida pre/post. La **Fase 1.1** añade el ajuste fino del ecualizador por
-banda (sliders en vivo). La **Fase 2** añade el asistente vocal local: análisis
-de la voz en vivo (sin FFT ni nube), sugerencias accionables con confirmación y
-resumen de sesión exportable.
+banda (sliders en vivo). La **Fase 1.2** añade la **puerta de ruido**
+configurable: umbral, ataque, liberación, *hold* y rango, con ajuste en vivo y
+persistencia por dispositivo. La **Fase 2** añade el asistente vocal local:
+análisis de la voz en vivo (sin FFT ni nube), sugerencias accionables con
+confirmación y resumen de sesión exportable.
 
 ## Principios
 
@@ -60,6 +62,11 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
   - **Dinámica**: `Compressor` (envolvente pico, ganancia suavizada en dB),
     `DeEsser` (banda de 6 kHz con envolvente), `Limiter` (con lookahead),
     `BoomSuppressor` (reducción dinámica de la banda baja-media ~200–300 Hz).
+  - **Puerta de ruido**: `NoiseGate` (Fase 1.2) con umbral, ataque, liberación,
+    *hold* y rango; envolvente pico con ataque/liberación por muestra, decisión
+    abierta/cerrada con *hold* y ganancia suavizada en dB (sin *zipper noise*).
+    Arranca cerrada y no asigna memoria en el callback. Va tras el pasa-altos en
+    los presets de voz.
   - **Tiempo/color**: `Saturator` (tanh), `Delay` (feedback, mezcla),
     `Reverb` (Schroeder: 4 comb + 2 allpass), `Gain`, `PassThroughProcessor`.
   - **Cadena**: `ChainProcessor` encadena módulos en orden, mide latencia
@@ -69,7 +76,10 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
     procesadores preconstruidos en un hilo de control. El **ajuste fino del
     EQ** (`DspHandle::set_eq_band`) reconstruye solo el `ParametricEq` con la
     banda modificada y lo conmuta por puntero; las bandas actuales viajan en
-    el estado (`DspLinkState::eq_bands`).
+    el estado (`DspLinkState::eq_bands`). La **puerta de ruido** se ajusta igual
+    (`DspHandle::set_noise_gate`): reconstruye el `NoiseGate` en el hilo de
+    control y lo conmuta por puntero; los parámetros viajan en
+    `DspLinkState::gate_params`.
 - `dsp::presets::PresetFactory`: `vozLimpia`, `radio` y `warm` (todas terminan
   en un limiter de seguridad e incluyen antifeedback: pasa-altos + muesca y/o
   supresión de *boominess*).
@@ -125,9 +135,10 @@ Cáscara de escritorio que orquesta el core:
 - `src-tauri/src/pairing.rs`: genera códigos de 6 caracteres sin caracteres
   ambiguos (`0/O`, `1/I/l`).
 - `src-tauri/src/tauri_app.rs` (feature `webview`): comandos expuestos a la UI,
-  incluidos `apply_preset`, `set_global_bypass`, `set_link_bypass` y
-  `set_eq_band`, que reconfiguran la cadena DSP en vivo vía `EngineManager`, y
-  los de análisis: `get_analysis`, `get_session_summary` y `apply_suggestion`.
+  incluidos `apply_preset`, `set_global_bypass`, `set_link_bypass`,
+  `set_eq_band` y `set_noise_gate`, que reconfiguran la cadena DSP en vivo vía
+  `EngineManager`, y los de análisis: `get_analysis`, `get_session_summary` y
+  `apply_suggestion`.
 
 La UI (React/TS) accede a Tauri **solo** a través de `src/lib/tauri.ts`; el
 estado se consume con el hook `useEngine` (que también replica la cabina con un
@@ -161,9 +172,10 @@ el escritorio ejecuta contra el motor; el resultado vuelve como evento `dsp`.
 4. El hilo de análisis desliza la ventana, evalúa sugerencias, mantiene el
    resumen de sesión (consultable vía `AnalysisHandle`) y emite
    `EngineEvent::Analysis` (máx. cada ~500 ms).
-5. Cuando el estado DSP cambia (preset, bypass o ajuste de EQ), el motor emite
-   `EngineEvent::Dsp` con la nueva cadena (incluidas las bandas del EQ); el
-   escritorio lo difunde igual que el resto.
+5. Cuando el estado DSP cambia (preset, bypass o ajuste de EQ/gate), el motor
+   emite `EngineEvent::Dsp` con la nueva cadena (incluidas las bandas del EQ y
+   los parámetros de la puerta de ruido); el escritorio lo difunde igual que el
+   resto.
 6. `EngineManager` (forwarder) actualiza el estado compartido y reenvía:
    - a la UI como evento Tauri `engine-event`;
    - al WebSocket como JSON serializado.
@@ -175,12 +187,13 @@ el escritorio ejecuta contra el motor; el resultado vuelve como evento `dsp`.
 
 La cadena no se toca desde el hilo de audio:
 
-1. La UI llama `apply_preset`/`set_*_bypass`/`set_eq_band` → `DspCommand` por
-   canal mpsc.
-2. El hilo de control de `DspHandle` construye la cadena (o el módulo EQ)
+1. La UI llama `apply_preset`/`set_*_bypass`/`set_eq_band`/`set_noise_gate` →
+   `DspCommand` por canal mpsc.
+2. El hilo de control de `DspHandle` construye la cadena (o el módulo EQ/gate)
    nueva —aquí sí se puede asignar memoria— y la intercambia atómicamente con
-   la activa. Para el EQ fino solo se reemplaza el procesador del eslabón `eq`
-   (`SetLinkProcessor`), sin reconstruir reverb/delay ni perder su estado.
+   la activa. Para el ajuste fino solo se reemplaza el procesador del eslabón
+   `eq` o `noisegate` (`SetLinkProcessor`/`SetLinkGate`), sin reconstruir
+   reverb/delay ni perder su estado.
 3. El callback de audio solo ve el puntero nuevo en la siguiente iteración;
    actualiza `Arc<Mutex<DspState>>` y emite `EngineEvent::Dsp`.
 
@@ -192,7 +205,8 @@ El WebSocket pasa de solo difundir a ser **bidireccional**:
 2. El servidor valida el tamaño (≤ 1 KB), lo deserializa y, con el mutex del
    `EngineManager` tomado solo durante la ejecución (nunca al hacer `await`),
    delega en los mismos métodos que usa la cabina (`stop`, `apply_preset`,
-   `set_global_bypass`, `set_link_bypass`, `set_eq_band`).
+   `set_global_bypass`, `set_link_bypass`, `set_eq_band`). El móvil no ajusta la
+   puerta de ruido: la ve en solo lectura.
 3. `EngineManager` persiste el cambio (igual que desde la cabina) y el core
    emite el evento `Dsp`/`status` correspondiente, que el WS vuelve a difundir a
    todos los clientes: el móvil se entera del resultado sin respuestas dedicadas.
@@ -215,11 +229,12 @@ volver a conectar el mismo dispositivo:
    La ruta es `$XDG_CONFIG_HOME/voxlfa/config.json` (o `~/.config/…`).
 2. `EngineManager` (desktop) orquesta la persistencia:
    - Al **arrancar**, aplica el perfil del dispositivo elegido (preset como
-     `initial_preset` y, después de levantar el pipeline, `set_eq_bands` + los
-     bypasses) — reaplica el ajuste fino con un único intercambio del EQ.
+     `initial_preset` y, después de levantar el pipeline, `set_eq_bands` +
+     `set_noise_gate` + los bypasses) — reaplica el ajuste fino con un único
+     intercambio del EQ y de la puerta de ruido.
    - Al **cambiar preset/bypasses**, los persiste al instante.
-   - El **ajuste fino del EQ** se actualiza en memoria y se vuelca al detener
-     el motor (evita escribir el archivo en cada paso del slider).
+   - El **ajuste fino del EQ y del gate** se actualiza en memoria y se vuelca al
+     detener el motor (evita escribir el archivo en cada paso del slider).
 3. `get_config` expone la configuración a la UI para precargar los selectores
    (validando que el dispositivo siga conectado).
 
@@ -251,6 +266,9 @@ es mínimo (la métrica real se lee en cada bloque).
 | Cadena conmutada por puntero (hilo de control) | Reconfiguración en vivo sin bloquear audio |
 | Reemplazo del módulo EQ solo (`SetLinkProcessor`) | Ajuste fino sin reconstruir la cadena entera ni perder el estado de reverb/delay |
 | Bandas del EQ en el estado (`eqBands`) | La UI y el móvil ven la configuración real, no solo el preset |
+| Puerta de ruido como módulo DSP + `set_noise_gate` | Mismo patrón que el EQ fino: reconstrucción en el hilo de control, conmutación por puntero, estado en `gateParams` |
+| Parámetros del gate (umbral/ataque/liberación/hold/rango) por preset | Cada preset de voz trae una puerta ya afinada; `dry` no la incluye |
+| Gate con rango finito (no corte total) y ganancia suavizada en dB | Cierre musical sin *zipper noise*; el silencio no se recorta en seco |
 | Análisis sin FFT (bandas con biquads) | O(n), sin dependencia extra y sin asignación en el callback |
 | Visualizador con FFT (`rustfft`, 2048/50 % solapamiento) reducida a 32 bandas logarítmicas | Sin FFT a pleno resolución por el WS/móvil; la escala log en frecuencia y dB coincide con la percepción |
 | Espectro suavizado: ataque one-pole + release lineal en dB | Barra estable sin temblor; el one-pole en dB decayó demasiado rápido (falló el test) |

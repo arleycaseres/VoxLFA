@@ -3,7 +3,9 @@
 //! La especificación es declarativa (protocolo) y se convierte en la cadena
 //! real mediante [`crate::dsp::chain::ChainProcessor`].
 
-use crate::protocol::{DspModuleKind, DspModuleSpec, EqBand, EqBandKind, PresetId, PresetInfo};
+use crate::protocol::{
+    DspModuleKind, DspModuleSpec, EqBand, EqBandKind, NoiseGateParams, PresetId, PresetInfo,
+};
 
 /// Fábrica de presets: devuelve la especificación de cadena de cada uno.
 pub struct PresetFactory;
@@ -58,13 +60,46 @@ impl PresetFactory {
             })
             .unwrap_or_default()
     }
+
+    /// Parámetros por defecto de la puerta de ruido de un preset, o `None` si
+    /// no tiene puerta de ruido.
+    ///
+    /// Se usan para restablecer el ajuste en vivo al aplicar un preset y para
+    /// guardar los perfiles por dispositivo.
+    pub fn gate_params(preset: PresetId) -> Option<NoiseGateParams> {
+        Self::specs(preset)
+            .into_iter()
+            .find_map(|spec| match spec.kind {
+                DspModuleKind::NoiseGate {
+                    threshold_db,
+                    attack_ms,
+                    release_ms,
+                    hold_ms,
+                    range_db,
+                } => Some(NoiseGateParams {
+                    threshold_db,
+                    attack_ms,
+                    release_ms,
+                    hold_ms,
+                    range_db,
+                }),
+                _ => None,
+            })
+    }
 }
 
-/// Voz limpia: pasa-altos, antifeedback (boominess), EQ suave, de-esser,
-/// compresor transparente y limiter.
+/// Voz limpia: pasa-altos, puerta de ruido, antifeedback (boominess), EQ suave,
+/// de-esser, compresor transparente y limiter.
 fn voce_limpia() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 80.0 }),
+        module(DspModuleKind::NoiseGate {
+            threshold_db: -50.0,
+            attack_ms: 2.0,
+            release_ms: 100.0,
+            hold_ms: 25.0,
+            range_db: 40.0,
+        }),
         module(DspModuleKind::BoomSuppressor {
             threshold_db: -30.0,
             freq_hz: 250.0,
@@ -97,11 +132,18 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
     ]
 }
 
-/// Radio: banda estrecha (pasa-altos + shelf de agudos), notch antifeedback,
-/// saturación y comp.
+/// Radio: banda estrecha (pasa-altos + shelf de agudos), puerta de ruido,
+/// notch antifeedback, saturación y comp.
 fn radio() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 250.0 }),
+        module(DspModuleKind::NoiseGate {
+            threshold_db: -45.0,
+            attack_ms: 1.0,
+            release_ms: 80.0,
+            hold_ms: 15.0,
+            range_db: 45.0,
+        }),
         module(DspModuleKind::Notch {
             freq_hz: 1000.0,
             q: 8.0,
@@ -131,11 +173,18 @@ fn radio() -> Vec<DspModuleSpec> {
     ]
 }
 
-/// Warm: bajos suaves con antifeedback (boominess), presencia vocal, compresión
-/// ligera y toque de reverb.
+/// Warm: bajos suaves con puerta de ruido y antifeedback (boominess), presencia
+/// vocal, compresión ligera y toque de reverb.
 fn warm() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 70.0 }),
+        module(DspModuleKind::NoiseGate {
+            threshold_db: -48.0,
+            attack_ms: 3.0,
+            release_ms: 120.0,
+            hold_ms: 30.0,
+            range_db: 40.0,
+        }),
         module(DspModuleKind::BoomSuppressor {
             threshold_db: -26.0,
             freq_hz: 200.0,
@@ -242,5 +291,21 @@ mod tests {
                 "el preset {preset:?} no tiene antifeedback"
             );
         }
+    }
+
+    #[test]
+    fn non_dry_presets_include_a_noise_gate() {
+        for preset in [PresetId::VozLimpia, PresetId::Radio, PresetId::Warm] {
+            let specs = PresetFactory::specs(preset);
+            let has_gate = specs
+                .iter()
+                .any(|s| matches!(s.kind, DspModuleKind::NoiseGate { .. }));
+            assert!(has_gate, "el preset {preset:?} no tiene puerta de ruido");
+            assert!(
+                PresetFactory::gate_params(preset).is_some(),
+                "el preset {preset:?} no expone gate_params"
+            );
+        }
+        assert_eq!(PresetFactory::gate_params(PresetId::Dry), None);
     }
 }
