@@ -29,6 +29,8 @@ export interface EngineStatus {
   bufferSize: number;
   /** Latencia medida captura→salida en ms. */
   latencyMs: number;
+  /** Host de audio activo (p. ej. `"alsa"`, `"jack"`). */
+  audioHost: string | null;
   /** Nombre del dispositivo de entrada en uso (si hay). */
   inputDevice: string | null;
   /** Nombre del dispositivo de salida en uso (si hay). */
@@ -112,6 +114,67 @@ export interface NoiseGateParams {
   rangeDb: number;
 }
 
+/** Estado de los modelos ONNX en el disco local (espejo de `core/src/models.rs`). */
+export interface ModelStatus {
+  /** `true` si todos los archivos del modelo están presentes. */
+  available: boolean;
+  /** Directorio donde se almacenan los modelos. */
+  modelDir: string;
+  /** Archivos que faltan (vacío si `available` es `true`). */
+  missing: string[];
+}
+
+/** Parámetros de supresión de ruido (espejo de `core/src/protocol/dsp.rs`). */
+export interface DenoiseParams {
+  /** Mezcla seco/húmedo (0 = sin denoise, 1 = denoise completo). */
+  mix: number;
+}
+
+/** Parámetros de supresión de feedback adaptativa. */
+export interface FeedbackSuppressorParams {
+  /** Umbral de detección en dBFS. */
+  thresholdDb: number;
+  /** Factor de calidad de los filtros notch. */
+  q: number;
+}
+
+/** Nota musical raíz para la escala de corrección de tono. */
+export type MusicalNote =
+  | "c"
+  | "cs"
+  | "d"
+  | "ds"
+  | "e"
+  | "f"
+  | "fs"
+  | "g"
+  | "gs"
+  | "a"
+  | "as"
+  | "b";
+
+/** Escala musical para la corrección de tono. */
+export type MusicalScale =
+  | "chromatic"
+  | "major"
+  | "minorNatural"
+  | "minorHarmonic"
+  | "pentatonicMajor"
+  | "pentatonicMinor"
+  | "blues";
+
+/** Parámetros de corrección de tono (espejo de `core/src/protocol/dsp.rs`). */
+export interface PitchCorrectionParams {
+  /** Escala musical objetivo. */
+  scale: MusicalScale;
+  /** Nota raíz de la escala. */
+  root: MusicalNote;
+  /** Intensidad de la corrección (0 = desactivada, 1 = corrección completa). */
+  strength: number;
+  /** Mezcla seco/húmedo (0 = seco, 1 = señal corregida completa). */
+  mix: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   /** Nombre corto del módulo (identificador para el bypass). */
@@ -124,6 +187,12 @@ export interface DspLinkState {
   eqBands: EqBand[] | null;
   /** Parámetros del gate si este módulo es la puerta de ruido; si no, `null`. */
   gateParams: NoiseGateParams | null;
+  /** Parámetros de denoise si este módulo es denoise; si no, `null`. */
+  denoiseParams: DenoiseParams | null;
+  /** Parámetros de feedback si este módulo es feedback; si no, `null`. */
+  feedbackParams: FeedbackSuppressorParams | null;
+  /** Parámetros de pitch correction si este módulo es pitch correction; si no, `null`. */
+  pitchCorrectionParams: PitchCorrectionParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -140,6 +209,23 @@ export interface DspState {
 export interface DeviceList {
   inputs: AudioDeviceInfo[];
   outputs: AudioDeviceInfo[];
+}
+
+/** Descripción de un host de audio disponible (ALSA, JACK, PipeWire, etc.). */
+export interface AudioHostInfo {
+  /** Identificador del host (p. ej. `"alsa"`, `"jack"`, `"pipewire"`). */
+  id: string;
+  /** Nombre legible para la UI. */
+  name: string;
+  /** `true` si el sistema lo tiene como predeterminado. */
+  isDefault: boolean;
+}
+
+/** Listado de hosts de audio disponibles. */
+export interface HostList {
+  hosts: AudioHostInfo[];
+  /** ID del host predeterminado del sistema. */
+  defaultId: string;
 }
 
 /**
@@ -162,6 +248,8 @@ export interface DeviceProfile {
 
 /** Configuración persistida de la app (`config.json` del usuario). */
 export interface AppConfig {
+  /** Último host de audio elegido (`null` = predeterminado del sistema). */
+  defaultHost: string | null;
   /** Última entrada elegida (`null` = predeterminada del sistema). */
   defaultInput: string | null;
   /** Última salida elegida (`null` = predeterminada del sistema). */
@@ -170,6 +258,8 @@ export interface AppConfig {
   bufferSize: number | null;
   /** Perfiles guardados, uno por dispositivo de entrada. */
   profiles: DeviceProfile[];
+  /** Consentimiento de telemetría: `null` = sin decidir, `true` = activada, `false` = desactivada. */
+  telemetryEnabled: boolean | null;
 }
 
 /** Métricas de la voz sobre la ventana deslizante de análisis (dBFS). */
@@ -197,12 +287,17 @@ export type SuggestionKind =
   | "timbre"
   | "dynamics"
   | "fatigue"
-  | "resonance";
+  | "resonance"
+  | "aiAdvisor";
 
 /** Acción confirmable que acompaña a una sugerencia. */
 export type SuggestionAction =
   | { type: "none" }
-  | { type: "applyPreset"; preset: PresetId };
+  | { type: "applyPreset"; preset: PresetId }
+  | { type: "setEqBand"; bandIndex: number; gainDb: number }
+  | { type: "setDenoise"; mix: number }
+  | { type: "setFeedback"; thresholdDb: number; q: number }
+  | { type: "setPitchCorrection"; strength: number; mix: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {

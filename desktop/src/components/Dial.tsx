@@ -54,9 +54,10 @@ interface DialProps {
 }
 
 export function Dial({ peakDb, rmsDb, label = "dBFS", size = 320 }: DialProps) {
-  const cx = size / 2;
-  const cy = size / 2;
-  const r = size / 2 - 10;
+  const baseSize = size;
+  const cx = baseSize / 2;
+  const cy = baseSize / 2;
+  const r = baseSize / 2 - 10;
 
   const { needleAngle, color, readout } = useMemo(() => {
     const angle = dbToAngle(peakDb);
@@ -95,12 +96,19 @@ export function Dial({ peakDb, rmsDb, label = "dBFS", size = 320 }: DialProps) {
   const colorClass = `dial--${color}`;
 
   return (
-    <div className={`dial ${colorClass}`} style={{ width: size, height: size }}>
-      <svg viewBox={`0 0 ${size} ${size}`} className="dial__svg" aria-hidden="true">
-        {gradientStops(70, "#2E3944", "#4FD8FF")}
+    <div className={`dial ${colorClass}`} style={{ width: "100%", maxWidth: `${baseSize}px`, aspectRatio: "1 / 1" }}>
+      <svg viewBox={`0 0 ${baseSize} ${baseSize}`} className="dial__svg" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          {gradientStops(70, "#2E3944", "#4FD8FF")}
+          <radialGradient id="dialFaceGradient" cx="40%" cy="35%" r="65%">
+            <stop offset="0%" stopColor="#1a1e24" />
+            <stop offset="60%" stopColor="#101318" />
+            <stop offset="100%" stopColor="#080a0d" />
+          </radialGradient>
+        </defs>
 
-        {/* Cara del dial */}
-        <circle cx={cx} cy={cy} r={r} className="dial__face" />
+        {/* Cara del dial (degradado radial 3D) */}
+        <circle cx={cx} cy={cy} r={r} fill="url(#dialFaceGradient)" className="dial__face" />
         <circle cx={cx} cy={cy} r={r} className="dial__rim" fill="none" />
 
         {/* Arco base (escala completa) */}

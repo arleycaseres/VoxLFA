@@ -36,11 +36,16 @@ export function PresetCard({
       disabled={disabled}
       onClick={onSelect}
       aria-pressed={active}
+      aria-label={`${name} preset ${active ? "activo" : ""}`}
     >
-      <span className="preset__name">{name}</span>
-      <span className="preset__desc">{description}</span>
-      {active && <span className="preset__badge">activo</span>}
-      <span className="preset__id">{id}</span>
+      <div className="preset__left">
+        <div className="preset__name" title={name}>{name}</div>
+        <div className="preset__desc" title={description}>{description}</div>
+      </div>
+      <div className="preset__right">
+        {active && <span className="preset__badge">activo</span>}
+        <div className="preset__id">{id}</div>
+      </div>
     </button>
   );
 }

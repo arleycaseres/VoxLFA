@@ -21,10 +21,11 @@ pub use analysis::{
 };
 pub use control::ControlCommand;
 pub use dsp::{
-    DspLinkState, DspModuleKind, DspModuleSpec, DspState, EqBand, EqBandKind, NoiseGateParams,
+    DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState, EqBand, EqBandKind,
+    FeedbackSuppressorParams, MusicalNote, MusicalScale, NoiseGateParams, PitchCorrectionParams,
     PresetId, PresetInfo,
 };
 pub use event::{
-    AudioDeviceInfo, EngineEvent, EngineState, EngineStatus, LevelSample, SpectrumSample,
-    SPECTRUM_BIN_COUNT,
+    AudioDeviceInfo, AudioHostInfo, EngineEvent, EngineState, EngineStatus, LevelSample,
+    SpectrumSample, SPECTRUM_BIN_COUNT,
 };

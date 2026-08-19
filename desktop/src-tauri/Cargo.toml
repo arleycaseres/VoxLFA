@@ -37,7 +37,7 @@ tauri-build = { version = "2", features = [], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-voxlfa-core = { path = "../../core", features = ["audio"] }
+voxlfa-core = { path = "../../core", features = ["audio", "rnnoise"] }
 
 tauri = { version = "2", features = [], optional = true }
 
@@ -52,3 +52,6 @@ local-ip-address = "0.6"
 # Autodetección por mDNS: publica `_voxlfa._tcp.local` en la red local para
 # que el móvil (u otras herramientas) encuentren el escritorio.
 mdns-sd = { version = "0.21", features = ["async", "log", "logging"] }
+
+# Envío HTTP de telemetría (solo eventos anónimos, opt-in).
+reqwest = { version = "0.12", features = ["blocking", "json"] }

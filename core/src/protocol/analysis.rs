@@ -42,6 +42,8 @@ pub enum SuggestionKind {
     Fatigue,
     /// Resonancia / *boominess*.
     Resonance,
+    /// Sugerencia del asesor de IA (LLM).
+    AiAdvisor,
 }
 
 /// Acción que el usuario puede confirmar desde la UI.
@@ -58,6 +60,32 @@ pub enum SuggestionAction {
     ApplyPreset {
         /// Preset sugerido.
         preset: PresetId,
+    },
+    /// Ajustar la ganancia de una banda del ecualizador.
+    SetEqBand {
+        /// Índice de la banda (0–6).
+        band_index: u8,
+        /// Ganancia objetivo en dB (−18 … +18).
+        gain_db: f32,
+    },
+    /// Ajustar la mezcla del denoise.
+    SetDenoise {
+        /// Mezcla seco/húmedo (0–1).
+        mix: f32,
+    },
+    /// Ajustar los parámetros del feedback suppressor.
+    SetFeedback {
+        /// Umbral de detección en dBFS.
+        threshold_db: f32,
+        /// Factor de calidad Q.
+        q: f32,
+    },
+    /// Ajustar la corrección de tono.
+    SetPitchCorrection {
+        /// Intensidad de la corrección (0–1).
+        strength: f32,
+        /// Mezcla seco/húmedo (0–1).
+        mix: f32,
     },
 }
 

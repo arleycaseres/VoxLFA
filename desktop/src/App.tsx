@@ -22,6 +22,8 @@ import "./styles/fonts.css";
 import "./styles/tokens.css";
 import "./styles/global.css";
 import "./App.css";
+import brandMark from "./assets/brand/brand_mark.png";
+import brandSecondary from "./assets/brand/brand_secondary.png";
 
 const IS_RUNNING = (state: string | null | undefined) => state === "running";
 
@@ -60,19 +62,44 @@ export default function App() {
   const running = IS_RUNNING(engine.status?.state);
   const busy = engine.busy;
   const level = engine.level;
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(
+    localStorage.getItem("voxlfa:leftCollapsed") === "1"
+  );
+  const [rightCollapsed, setRightCollapsed] = useState<boolean>(
+    localStorage.getItem("voxlfa:rightCollapsed") === "1"
+  );
+  const [leftWidth, setLeftWidth] = useState<number>(() =>
+    parseInt(localStorage.getItem("voxlfa:leftCol") ?? "300", 10)
+  );
+  const [rightWidth, setRightWidth] = useState<number>(() =>
+    parseInt(localStorage.getItem("voxlfa:rightCol") ?? "320", 10)
+  );
+
+  const toggleLeft = () => {
+    const next = !leftCollapsed;
+    setLeftCollapsed(next);
+    localStorage.setItem("voxlfa:leftCollapsed", next ? "1" : "0");
+  };
+
+  const toggleRight = () => {
+    const next = !rightCollapsed;
+    setRightCollapsed(next);
+    localStorage.setItem("voxlfa:rightCollapsed", next ? "1" : "0");
+  };
 
   return (
     <div className="app">
       {/* Barra superior */}
       <header className="app__header">
         <div className="brand">
-          <svg viewBox="0 0 32 32" className="brand__mark" aria-hidden="true">
-            <circle cx="16" cy="16" r="13" fill="none" stroke="var(--color-border)" strokeWidth="3" />
-            <line x1="16" y1="16" x2="24" y2="8" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" />
-            <path d="M 9 21 A 10 10 0 0 1 23 21" fill="none" stroke="var(--color-cyan)" strokeWidth="2" />
-          </svg>
-          <span className="brand__name">Vox<span className="brand__accent">LFA</span></span>
-          <span className="brand__tag">procesador vocal en vivo</span>
+          <img src={brandMark} alt="VoxLFA" className="brand__mark" />
+          <div className="brand__names">
+            <img src={brandSecondary} alt="VoxLFA secondary" className="brand__secondary" />
+            <div className="brand__meta">
+              <span className="brand__name">Vox<span className="brand__accent">LFA</span></span>
+              <span className="brand__tag">procesador vocal en vivo</span>
+            </div>
+          </div>
         </div>
         <div className="app__header-right">
           <StatusPill state={engine.status?.state ?? null} />
@@ -81,10 +108,30 @@ export default function App() {
       </header>
 
       {/* Cuerpo en rejilla de tres columnas */}
-      <main className="app__main">
+      <main
+        className={`app__main`}
+        style={{
+          ["--left-col" as any]: leftCollapsed ? "40px" : `${leftWidth}px`,
+          ["--right-col" as any]: rightCollapsed ? "40px" : `${rightWidth}px`,
+          ["--resizer-left" as any]: leftCollapsed ? "0px" : "8px",
+          ["--resizer-right" as any]: rightCollapsed ? "0px" : "8px",
+        }}
+      >
         {/* Panel izquierdo: motor y dispositivos */}
-        <aside className="panel panel--controls">
-          <h2 className="panel__title">Motor</h2>
+        <aside
+          className={`panel panel--controls ${leftCollapsed ? "is-collapsed" : ""}`}
+        >
+          <h2 className="panel__title">
+            Motor
+            <button
+              type="button"
+              className="panel__collapse"
+              aria-label={leftCollapsed ? "Expandir panel izquierdo" : "Colapsar panel izquierdo"}
+              onClick={toggleLeft}
+            >
+              {leftCollapsed ? "›" : "‹"}
+            </button>
+          </h2>
 
           <DeviceSelector
             label="Entrada"
@@ -214,8 +261,18 @@ export default function App() {
         </section>
 
         {/* Panel derecho: presets y sugerencias de IA */}
-        <aside className="panel panel--side">
-          <h2 className="panel__title">Presets</h2>
+        <aside className={`panel panel--side ${rightCollapsed ? "is-collapsed" : ""}`}>
+          <h2 className="panel__title">
+            Presets
+            <button
+              type="button"
+              className="panel__collapse panel__collapse--right"
+              aria-label={rightCollapsed ? "Expandir panel derecho" : "Colapsar panel derecho"}
+              onClick={toggleRight}
+            >
+              {rightCollapsed ? "‹" : "›"}
+            </button>
+          </h2>
           <div className="preset__list">
             {(engine.presets ?? []).map((preset) => (
               <PresetCard

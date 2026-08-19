@@ -60,6 +60,7 @@ const KIND_TEXT: Record<Suggestion["kind"], string> = {
   dynamics: "Dinámica",
   fatigue: "Fatiga",
   resonance: "Resonancia",
+  aiAdvisor: "Asesor IA",
 };
 
 /** Etiqueta en español de cada tipo de banda del EQ. */
@@ -210,6 +211,7 @@ export function MonitorView({ status, level, spectrum, dsp, analysis }: MonitorV
         />
         <InfoRow label="Muestreo" value={status ? `${(status.sampleRate / 1000).toFixed(1)} kHz` : "—"} />
         <InfoRow label="Buffer" value={status ? `${status.bufferSize} smp` : "—"} />
+        <InfoRow label="Host" value={status?.audioHost ?? "—"} />
         <InfoRow label="Entrada" value={status?.inputDevice ?? "—"} />
         <InfoRow label="Salida" value={status?.outputDevice ?? "—"} />
       </View>

@@ -23,6 +23,43 @@ El núcleo compartido está en `core/`; la UI de escritorio solo es una cáscara
 que se comunica con él. El móvil no duplica lógica de audio: se conecta al motor
 que corre en el escritorio.
 
+## Cambios recientes (Frontend)
+
+- Reestructurado el panel de `Sugerencias` para mayor jerarquía y usabilidad:
+    - Se separó la sección de `Estado actual` (métricas) y queda colapsada por defecto.
+    - `Sugerencias activas` muestra hasta 3 sugerencias ordenadas por severidad, con opción `Ver todas`.
+    - Las sugerencias usan una estructura tipada obligatoria: `detected`, `consequence`, `recommendation`, `severity`.
+    - El descarte de sugerencias (`dismiss`) persiste en `sessionStorage` durante la sesión.
+
+- Mejora de `Presets`:
+    - Lista de presets es ahora un grid responsivo (`auto-fit`/`minmax`) que evita overflow.
+    - `PresetCard` reestructurada en columnas (left/right), con truncado seguro y metadatos accesibles.
+
+- Cabecera y logos:
+    - Se integraron los logos en `desktop/src/assets/brand/` y se usan en la cabecera.
+
+- IA y sesión:
+    - Eliminado botón duplicado `Pedir consejo a la IA` (ahora solo en el panel de IA).
+    - `Actualizar resumen` muestra estado de refresco y renderiza campos con comprobaciones seguras.
+
+- Responsividad y accesibilidad:
+    - Variables globales para transiciones y breakpoints (`desktop/src/lib/uiConstants.ts` y CSS variables).
+    - Botones y controles con áreas táctiles mínimas; SVGs y medidores preparados para escalado.
+
+Pruebas rápidas:
+
+```bash
+cd desktop
+npm run dev -- --port 1421
+```
+
+Abrir http://localhost:1421 y verificar:
+- Panel de Sugerencias (máx. 3 visibles, `Ver todas`).
+- Presets: nombres largos no generan overflow.
+- Cabecera muestra los logos correctamente.
+
+Si detectas problemas visuales indica el componente y la resolución y lo ajustaré.
+
 ## Roadmap
 
 Ver [`docs/roadmap.md`](docs/roadmap.md) para el detalle completo por fases.

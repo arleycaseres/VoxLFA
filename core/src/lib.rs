@@ -55,7 +55,9 @@ pub mod analysis;
 pub mod config;
 pub mod dsp;
 pub mod error;
+pub mod models;
 pub mod protocol;
+pub mod telemetry;
 
 #[cfg(feature = "audio")]
 pub mod audio;

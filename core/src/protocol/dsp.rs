@@ -22,6 +22,17 @@ pub enum PresetId {
     Warm,
 }
 
+impl std::fmt::Display for PresetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PresetId::Dry => write!(f, "dry"),
+            PresetId::VozLimpia => write!(f, "vozLimpia"),
+            PresetId::Radio => write!(f, "radio"),
+            PresetId::Warm => write!(f, "warm"),
+        }
+    }
+}
+
 /// Metadatos de un preset para mostrarlo en la cabina.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,6 +88,109 @@ pub struct NoiseGateParams {
     pub hold_ms: f32,
     /// Atenuación máxima aplicada al cerrar (dB).
     pub range_db: f32,
+}
+
+/// Parámetros de supresión de ruido (espejo de `DspModuleKind::Denoise`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DenoiseParams {
+    /// Mezcla seco/húmedo (0 = sin denoise, 1 = denoise completo).
+    pub mix: f32,
+}
+
+/// Parámetros de supresión de feedback adaptativa (espejo de
+/// `DspModuleKind::FeedbackSuppressor`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedbackSuppressorParams {
+    /// Umbral de detección en dBFS.
+    pub threshold_db: f32,
+    /// Factor de calidad de los filtros notch (mayor = más estrecho).
+    pub q: f32,
+}
+
+/// Nota musical raíz para la escala de corrección de tono.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MusicalNote {
+    /// Do (C).
+    C,
+    /// Do sostenido (C#).
+    Cs,
+    /// Re (D).
+    D,
+    /// Re sostenido (D#).
+    Ds,
+    /// Mi (E).
+    E,
+    /// Fa (F).
+    F,
+    /// Fa sostenido (F#).
+    Fs,
+    /// Sol (G).
+    G,
+    /// Sol sostenido (G#).
+    Gs,
+    /// La (A).
+    A,
+    /// La sostenido (A#).
+    As,
+    /// Si (B).
+    B,
+}
+
+impl MusicalNote {
+    /// Semitonos desde C (0–11).
+    pub fn semitones(self) -> u8 {
+        match self {
+            Self::C => 0,
+            Self::Cs => 1,
+            Self::D => 2,
+            Self::Ds => 3,
+            Self::E => 4,
+            Self::F => 5,
+            Self::Fs => 6,
+            Self::G => 7,
+            Self::Gs => 8,
+            Self::A => 9,
+            Self::As => 10,
+            Self::B => 11,
+        }
+    }
+}
+
+/// Escala musical para la corrección de tono.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MusicalScale {
+    /// Cromática: corrige a la nota más cercana (cualquier semitono).
+    Chromatic,
+    /// Mayor: I–II–III–IV–V–VI–VII.
+    Major,
+    /// Menor natural: I–II–III–IV–V–VI–VII.
+    MinorNatural,
+    /// Menor armónica: I–II–III–IV–V–VI–VII↑.
+    MinorHarmonic,
+    /// Pentatónica mayor: I–II–III–V–VI.
+    PentatonicMajor,
+    /// Pentatónica menor: I–III–IV–V–VII.
+    PentatonicMinor,
+    /// Blues: I–III–IV–V–VII.
+    Blues,
+}
+
+/// Parámetros de corrección de tono (espejo de `DspModuleKind::PitchCorrection`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PitchCorrectionParams {
+    /// Escala musical objetivo.
+    pub scale: MusicalScale,
+    /// Nota raíz de la escala.
+    pub root: MusicalNote,
+    /// Intensidad de la corrección (0 = desactivada, 1 = corrección completa).
+    pub strength: f32,
+    /// Mezcla seco/húmedo (0 = seco, 1 = señal corregida completa).
+    pub mix: f32,
 }
 
 /// Tipo de módulo de la cadena DSP con sus parámetros.
@@ -187,6 +301,29 @@ pub enum DspModuleKind {
         /// Tiempo de recuperación (ms).
         release_ms: f32,
     },
+    /// Supresión de ruido (RNNoise / ONNX).
+    Denoise {
+        /// Mezcla seco/húmedo (0 = sin denoise, 1 = denoise completo).
+        mix: f32,
+    },
+    /// Supresión de feedback adaptativa (FFT + notch adaptativo).
+    FeedbackSuppressor {
+        /// Umbral de detección (dBFS): picos por encima se consideran feedback.
+        threshold_db: f32,
+        /// Factor de calidad de los filtros notch (mayor = más estrecho).
+        q: f32,
+    },
+    /// Corrección de tono en tiempo real (Auto-Tune / pitch correction).
+    PitchCorrection {
+        /// Escala musical objetivo.
+        scale: MusicalScale,
+        /// Nota raíz de la escala.
+        root: MusicalNote,
+        /// Intensidad de la corrección (0 = desactivada, 1 = corrección completa).
+        strength: f32,
+        /// Mezcla seco/húmedo (0 = seco, 1 = señal corregida completa).
+        mix: f32,
+    },
 }
 
 /// Especificación de un módulo dentro de la cadena.
@@ -215,6 +352,16 @@ pub struct DspLinkState {
     /// Parámetros actuales de la puerta de ruido si este módulo es el gate;
     /// `None` en los demás. Refleja los ajustes en vivo con `set_noise_gate`.
     pub gate_params: Option<NoiseGateParams>,
+    /// Parámetros actuales de denoise si este módulo es denoise; `None` en los
+    /// demás. Refleja los ajustes en vivo con `set_denoise`.
+    pub denoise_params: Option<DenoiseParams>,
+    /// Parámetros actuales de feedback suppressor si este módulo es feedback;
+    /// `None` en los demás. Refleja los ajustes en vivo con `set_feedback`.
+    pub feedback_params: Option<FeedbackSuppressorParams>,
+    /// Parámetros actuales de corrección de tono si este módulo es pitch
+    /// correction; `None` en los demás. Refleja los ajustes en vivo con
+    /// `set_pitch_correction`.
+    pub pitch_correction_params: Option<PitchCorrectionParams>,
 }
 
 /// Estado completo de la cadena DSP activa.

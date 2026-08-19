@@ -7,36 +7,49 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   AnalysisSample,
   AppConfig,
+  DenoiseParams,
   DeviceList,
   DspState,
   EngineEvent,
   EngineStatus,
+  FeedbackSuppressorParams,
   LevelSample,
+  ModelStatus,
   NoiseGateParams,
+  PitchCorrectionParams,
   PresetId,
   PresetInfo,
   SessionSummary,
   SpectrumSample,
+  Suggestion,
 } from "../lib/types";
 import {
   applyPreset,
   applySuggestion,
+  downloadModels,
   getAnalysis,
   getConfig,
   getDspState,
   getEngineStatus,
   getLastLevel,
   getLastSpectrum,
+  getModelStatus,
   getPairingInfo,
   getPresets,
   getSessionSummary,
   listDevices,
   onEngineEvent,
+  onModelDownloadProgress,
   onPairingEvent,
+  requestAiSuggestions,
+  setDenoise,
   setEqBand,
+  setFeedback,
   setGlobalBypass,
   setLinkBypass,
   setNoiseGate,
+  setPitchCorrection,
+  setTelemetryConsent,
   startEngine,
   stopEngine,
   type PairingInfo,
@@ -63,6 +76,10 @@ export interface EngineController {
   analysis: AnalysisSample | null;
   /** Resumen acumulado de la sesión en curso (o `null`). */
   sessionSummary: SessionSummary | null;
+  /** Estado de los modelos ONNX en disco. */
+  modelStatus: ModelStatus | null;
+  /** Progreso de descarga de modelos (`null` = no está descargando). */
+  modelDownloadProgress: { step: number; total: number } | null;
   /** Mensaje del último aviso (o `null`). */
   warning: string | null;
   /** Error de la última operación (o `null`). */
@@ -70,11 +87,13 @@ export interface EngineController {
   /** `true` mientras una operación de arranque/parada está en curso. */
   busy: boolean;
   /** Arranca el motor con los dispositivos indicados (`null` = default).
-   *  `bufferSize` (`null` = auto por heurística de dispositivo). */
+   *  `bufferSize` (`null` = auto por heurística de dispositivo).
+   *  `audioHost` (`null` = predeterminado del sistema; p. ej. `"jack"`, `"alsa"`). */
   start: (
     input?: string | null,
     output?: string | null,
     bufferSize?: number | null,
+    audioHost?: string | null,
   ) => Promise<void>;
   /** Detiene el motor. */
   stop: () => Promise<void>;
@@ -90,10 +109,30 @@ export interface EngineController {
   setEqBand: (bandIndex: number, gainDb: number) => Promise<void>;
   /** Ajusta los parámetros de la puerta de ruido del preset activo en vivo. */
   setNoiseGate: (params: NoiseGateParams) => Promise<void>;
+  /** Ajusta la mezcla seco/húmedo del denoise del preset activo en vivo. */
+  setDenoise: (params: DenoiseParams) => Promise<void>;
+  /** Ajusta los parámetros del feedback suppressor del preset activo en vivo. */
+  setFeedback: (params: FeedbackSuppressorParams) => Promise<void>;
+  /** Ajusta los parámetros de corrección de tono del preset activo en vivo. */
+  setPitchCorrection: (params: PitchCorrectionParams) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
   refreshSessionSummary: () => Promise<void>;
+  /** Establece el consentimiento de telemetría (opt-in / opt-out). */
+  setTelemetryConsent: (enabled: boolean) => Promise<void>;
+  /** Comprueba si los modelos ONNX están descargados. */
+  checkModelStatus: () => Promise<void>;
+  /** Descarga los modelos ONNX desde los assets de GitHub. */
+  downloadModel: () => Promise<void>;
+  /** Sugerencias generadas por el asesor de IA (Groq). */
+  aiSuggestions: Suggestion[];
+  /** `true` mientras se consultan las sugerencias de IA. */
+  aiLoading: boolean;
+  /** Error de la última consulta al asesor IA (o vacío). */
+  aiError: string;
+  /** Solicita sugerencias al asesor de IA con las métricas actuales. */
+  requestAi: () => Promise<void>;
 }
 
 /**
@@ -116,6 +155,14 @@ export function useEngine(): EngineController {
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<{
+    step: number;
+    total: number;
+  } | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<Suggestion[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -126,11 +173,16 @@ export function useEngine(): EngineController {
   }, []);
 
   const start = useCallback(
-    async (input?: string | null, output?: string | null, bufferSize?: number | null) => {
+    async (
+      input?: string | null,
+      output?: string | null,
+      bufferSize?: number | null,
+      audioHost?: string | null,
+    ) => {
       setBusy(true);
       setError(null);
       try {
-        await startEngine(input ?? null, output ?? null, bufferSize ?? null);
+        await startEngine(input ?? null, output ?? null, bufferSize ?? null, audioHost ?? null);
       } catch (err) {
         setError(String(err));
       } finally {
@@ -192,6 +244,30 @@ export function useEngine(): EngineController {
     }
   }, []);
 
+  const setDenoiseAction = useCallback(async (params: DenoiseParams) => {
+    try {
+      await setDenoise(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setFeedbackAction = useCallback(async (params: FeedbackSuppressorParams) => {
+    try {
+      await setFeedback(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setPitchCorrectionAction = useCallback(async (params: PitchCorrectionParams) => {
+    try {
+      await setPitchCorrection(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
   const applySuggestionAction = useCallback(async (suggestionId: number) => {
     try {
       await applySuggestion(suggestionId);
@@ -201,11 +277,49 @@ export function useEngine(): EngineController {
   }, []);
 
   const refreshSessionSummary = useCallback(async () => {
+    const summary = await getSessionSummary();
+    if (summary) setSessionSummary(summary);
+  }, []);
+
+  const setTelemetryConsentAction = useCallback(async (enabled: boolean) => {
     try {
-      const summary = await getSessionSummary();
-      if (summary) setSessionSummary(summary);
+      await setTelemetryConsent(enabled);
+      setConfig((prev) => (prev ? { ...prev, telemetryEnabled: enabled } : prev));
     } catch (err) {
       setError(String(err));
+    }
+  }, []);
+
+  const checkModelStatusAction = useCallback(async () => {
+    try {
+      setModelStatus(await getModelStatus());
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const downloadModelAction = useCallback(async () => {
+    try {
+      setModelDownloadProgress({ step: 0, total: 1 });
+      const status = await downloadModels();
+      setModelStatus(status);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setModelDownloadProgress(null);
+    }
+  }, []);
+
+  const requestAiAction = useCallback(async () => {
+    setAiLoading(true);
+    setAiError("");
+    try {
+      const suggestions = await requestAiSuggestions();
+      setAiSuggestions(suggestions);
+    } catch (err) {
+      setAiError(String(err));
+    } finally {
+      setAiLoading(false);
     }
   }, []);
 
@@ -259,8 +373,13 @@ export function useEngine(): EngineController {
       setPairing((previous) => (previous ? { ...previous, code } : previous));
     }).catch(() => undefined);
 
+    // Escuchar progreso de descarga de modelos ONNX.
+    const unsubscribeProgress = onModelDownloadProgress((progress) => {
+      setModelDownloadProgress(progress);
+    }).catch(() => undefined);
+
     (async () => {
-      const [status, level, spectrum, pairing, presets, config, dsp, analysis] =
+      const [status, level, spectrum, pairing, presets, config, dsp, analysis, models] =
         await Promise.allSettled([
           getEngineStatus(),
           getLastLevel(),
@@ -270,6 +389,7 @@ export function useEngine(): EngineController {
           getConfig(),
           getDspState(),
           getAnalysis(),
+          getModelStatus(),
         ]);
       if (cancelled) return;
       if (status.status === "fulfilled") setStatus(status.value);
@@ -283,6 +403,7 @@ export function useEngine(): EngineController {
       if (dsp.status === "fulfilled" && dsp.value) setDsp(dsp.value);
       if (analysis.status === "fulfilled" && analysis.value)
         setAnalysis(analysis.value);
+      if (models.status === "fulfilled") setModelStatus(models.value);
     })();
 
     refreshDevices();
@@ -291,6 +412,7 @@ export function useEngine(): EngineController {
       cancelled = true;
       unsubscribe.then((fn) => fn?.());
       unsubscribePairing.then((fn) => fn?.());
+      unsubscribeProgress.then((fn) => fn?.());
     };
   }, [refreshDevices]);
 
@@ -308,6 +430,8 @@ export function useEngine(): EngineController {
     warning,
     error,
     busy,
+    modelStatus,
+    modelDownloadProgress,
     start,
     stop,
     refreshDevices,
@@ -316,7 +440,17 @@ export function useEngine(): EngineController {
     setLinkBypass: setLinkBypassAction,
     setEqBand: setEqBandAction,
     setNoiseGate: setNoiseGateAction,
+    setDenoise: setDenoiseAction,
+    setFeedback: setFeedbackAction,
+    setPitchCorrection: setPitchCorrectionAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
+    setTelemetryConsent: setTelemetryConsentAction,
+    checkModelStatus: checkModelStatusAction,
+    downloadModel: downloadModelAction,
+    aiSuggestions,
+    aiLoading,
+    aiError,
+    requestAi: requestAiAction,
   };
 }

@@ -1,5 +1,9 @@
 /* Estilos base de VoxLFA. */
 
+:root {
+  --ui-transition-ms: 180ms;
+  --ui-transition-ease: cubic-bezier(.2,.9,.3,1);
+}
 *,
 *::before,
 *::after {
@@ -21,6 +25,36 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Textura sutil de fibra de carbono sobre el fondo base. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.035;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 1px,
+      rgba(255, 255, 255, 0.04) 1px,
+      rgba(255, 255, 255, 0.04) 2px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 1px,
+      rgba(255, 255, 255, 0.04) 1px,
+      rgba(255, 255, 255, 0.04) 2px
+    );
+}
+
+#root {
+  position: relative;
+  z-index: 1;
 }
 
 ::selection {

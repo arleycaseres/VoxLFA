@@ -21,8 +21,10 @@ use voxlfa_core::audio::{AudioEngine, AudioEngineConfig, DspHandle, EngineHandle
 use voxlfa_core::config::{ConfigStore, DEFAULT_DEVICE_KEY};
 use voxlfa_core::dsp::PresetFactory;
 use voxlfa_core::protocol::{
-    DspState, EngineEvent, EngineStatus, LevelSample, NoiseGateParams, PresetId, SpectrumSample,
+    DspState, EngineEvent, EngineStatus, LevelSample, NoiseGateParams, PitchCorrectionParams,
+    PresetId, SpectrumSample,
 };
+use voxlfa_core::telemetry::{SessionTimer, TelemetryEvent, TelemetryHandle};
 
 /// Errores del gestor del motor.
 #[derive(Debug, thiserror::Error)]
@@ -62,6 +64,12 @@ pub struct EngineManager {
     /// Clave de perfil del dispositivo de entrada en uso mientras el motor
     /// corre (`DEFAULT_DEVICE_KEY` si se arrancó con el predeterminado).
     current_device: Option<String>,
+    /// Handle para emitir eventos de telemetría (anónima, opt-in).
+    telemetry: TelemetryHandle,
+    /// Cronómetro de la sesión en curso (para métricas de duración y latencia).
+    session_timer: Option<SessionTimer>,
+    /// Preset activo al arrancar la sesión (para el evento `SessionEnded`).
+    session_preset: Option<PresetId>,
 }
 
 impl EngineManager {
@@ -69,7 +77,7 @@ impl EngineManager {
     ///
     /// La configuración se carga desde la ruta estándar del usuario
     /// (`$XDG_CONFIG_HOME/voxlfa/config.json`).
-    pub fn new(events: broadcast::Sender<String>) -> Self {
+    pub fn new(events: broadcast::Sender<String>, telemetry: TelemetryHandle) -> Self {
         let config = match voxlfa_core::config::default_config_path() {
             Some(path) => ConfigStore::load(&path),
             None => ConfigStore::memory(),
@@ -85,6 +93,9 @@ impl EngineManager {
             events,
             config,
             current_device: None,
+            telemetry,
+            session_timer: None,
+            session_preset: None,
         }
     }
 
@@ -158,6 +169,7 @@ impl EngineManager {
         let profile_input = config.input_device.clone();
         let profile_output = config.output_device.clone();
         let profile_buffer = config.buffer_size;
+        let profile_host = config.audio_host.clone();
 
         // El preset del perfil se aplica al construir la cadena inicial.
         let mut engine_config = config;
@@ -165,17 +177,27 @@ impl EngineManager {
             engine_config.initial_preset = profile.preset;
         }
 
+        // Extraer datos de telemetría antes de que engine_config se mueva.
+        let telemetry_preset = engine_config.initial_preset;
+        let telemetry_buffer = engine_config.buffer_size.unwrap_or(0);
+
         let (tx, rx) = mpsc::channel();
         let (handle, dsp, analysis) = AudioEngine::start(engine_config, tx)?;
 
-        // Reaplicar el ajuste fino del EQ, la puerta de ruido y los bypasses
-        // persistidos.
+        // Reaplicar el ajuste fino del EQ, la puerta de ruido, el feedback
+        // suppressor, la corrección de tono y los bypasses persistidos.
         if let Some(profile) = profile {
             if !profile.eq_bands.is_empty() {
                 let _ = dsp.set_eq_bands(profile.eq_bands);
             }
             if let Some(gate) = profile.gate_params {
                 let _ = dsp.set_noise_gate(gate);
+            }
+            if let Some(feedback) = profile.feedback_params {
+                let _ = dsp.set_feedback(feedback);
+            }
+            if let Some(pitch) = profile.pitch_correction_params {
+                let _ = dsp.set_pitch_correction(pitch);
             }
             if profile.global_bypass {
                 let _ = dsp.set_global_bypass(true);
@@ -187,6 +209,7 @@ impl EngineManager {
 
         // Recordar los últimos dispositivos elegidos para precargar la UI.
         let cfg = self.config.config_mut();
+        cfg.default_host = profile_host;
         cfg.default_input = profile_input.clone();
         cfg.default_output = profile_output.clone();
         cfg.buffer_size = profile_buffer;
@@ -244,6 +267,20 @@ impl EngineManager {
         self.handle = Some(handle);
         self.dsp = Some(dsp);
         self.analysis = Some(analysis);
+
+        // Telemetría: iniciar cronómetro y emitir `SessionStarted`.
+        if self.config.config().telemetry_enabled == Some(true) {
+            let mut timer = SessionTimer::start();
+            timer.record_latency(0.0); // Se actualizará con las muestras reales.
+            self.session_timer = Some(timer);
+            self.session_preset = Some(telemetry_preset);
+            self.telemetry.emit(TelemetryEvent::SessionStarted {
+                preset: telemetry_preset.to_string(),
+                sample_rate: 0, // Se actualizará con el status real.
+                buffer_size: telemetry_buffer,
+            });
+        }
+
         Ok(())
     }
 
@@ -271,12 +308,35 @@ impl EngineManager {
                         .iter()
                         .find(|link| link.name == "noisegate")
                         .and_then(|link| link.gate_params);
+                    profile.feedback_params = state
+                        .links
+                        .iter()
+                        .find(|link| link.name == "feedback")
+                        .and_then(|link| link.feedback_params);
+                    profile.pitch_correction_params = state
+                        .links
+                        .iter()
+                        .find(|link| link.name == "pitch_correction")
+                        .and_then(|link| link.pitch_correction_params);
                     profile.link_bypass = state
                         .links
                         .iter()
                         .filter(|link| link.bypass)
                         .map(|link| (link.name.clone(), true))
                         .collect();
+
+                    // Telemetría: emitir `SessionEnded` con las métricas acumuladas.
+                    if self.config.config().telemetry_enabled == Some(true) {
+                        if let Some(timer) = self.session_timer.take() {
+                            self.telemetry.emit(TelemetryEvent::SessionEnded {
+                                duration_secs: timer.duration_secs(),
+                                preset: state.preset.to_string(),
+                                preset_changes: timer.preset_changes(),
+                                avg_latency_ms: timer.avg_latency_ms(),
+                            });
+                        }
+                        self.session_preset = None;
+                    }
                 }
             }
             // El guardado es best-effort: si falla, la sesión sigue.
@@ -301,9 +361,15 @@ impl EngineManager {
             profile.preset = preset;
             profile.eq_bands = PresetFactory::eq_bands(preset);
             profile.gate_params = PresetFactory::gate_params(preset);
+            profile.feedback_params = None; // Reset al cambiar de preset.
+            profile.pitch_correction_params = None; // Reset al cambiar de preset.
             profile.global_bypass = false;
             profile.link_bypass.clear();
         });
+        // Telemetría: registrar cambio de preset.
+        if let Some(timer) = &mut self.session_timer {
+            timer.record_preset_change();
+        }
         self.save_config();
         Ok(())
     }
@@ -360,6 +426,48 @@ impl EngineManager {
         Ok(())
     }
 
+    /// Ajusta la mezcla seco/húmedo del denoise del preset activo en vivo.
+    ///
+    /// El perfil se actualiza en memoria (se vuelca al detener el motor, para
+    /// no escribir el archivo en cada paso del slider).
+    pub fn set_denoise(
+        &mut self,
+        params: voxlfa_core::protocol::DenoiseParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_denoise(params)?;
+        self.update_current_profile(|profile| {
+            profile.denoise_params = Some(params);
+        });
+        Ok(())
+    }
+
+    /// Ajusta los parámetros del feedback suppressor del preset activo en vivo.
+    pub fn set_feedback(
+        &mut self,
+        params: voxlfa_core::protocol::FeedbackSuppressorParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_feedback(params)?;
+        self.update_current_profile(|profile| {
+            profile.feedback_params = Some(params);
+        });
+        Ok(())
+    }
+
+    /// Ajusta los parámetros de corrección de tono del preset activo en vivo.
+    pub fn set_pitch_correction(
+        &mut self,
+        params: PitchCorrectionParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_pitch_correction(params)?;
+        self.update_current_profile(|profile| {
+            profile.pitch_correction_params = Some(params);
+        });
+        Ok(())
+    }
+
     /// Aplica un cambio al perfil del dispositivo en uso, si el motor corre.
     fn update_current_profile(
         &mut self,
@@ -374,5 +482,29 @@ impl EngineManager {
     /// Guarda la configuración en disco (best-effort).
     fn save_config(&mut self) {
         let _ = self.config.save();
+    }
+
+    /// Devuelve el estado del consentimiento de telemetría.
+    ///
+    /// - `None` = sin decidir (mostrar diálogo de consentimiento).
+    /// - `Some(true)` = telemetría activada.
+    /// - `Some(false)` = telemetría desactivada.
+    pub fn get_telemetry_consent(&self) -> Option<bool> {
+        self.config.config().telemetry_enabled
+    }
+
+    /// Establece el consentimiento de telemetría y lo persiste.
+    pub fn set_telemetry_consent(&mut self, enabled: bool) {
+        self.config.config_mut().telemetry_enabled = Some(enabled);
+        self.telemetry
+            .emit(TelemetryEvent::ConsentChanged { enabled });
+        self.save_config();
+    }
+
+    /// Emite un evento `AppStarted` si la telemetría está habilitada.
+    pub fn emit_app_started(&self) {
+        if self.config.config().telemetry_enabled == Some(true) {
+            self.telemetry.app_started(env!("CARGO_PKG_VERSION"));
+        }
     }
 }

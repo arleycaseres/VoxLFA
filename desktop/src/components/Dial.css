@@ -1,8 +1,10 @@
-/* Dial central: cara, marcas y aguja tipo instrumento de cabina. */
+/* Dial central: cara, marcas y aguja tipo instrumento de cabina.
+   Estilo tacómetro digital Lexus LFA con efecto 3D profundo. */
 
 .dial {
   position: relative;
   user-select: none;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
 }
 
 .dial__svg {
@@ -10,58 +12,64 @@
   height: 100%;
 }
 
-/* Cara en degradado (efecto cóncavo 3D). */
+/* Cara en degradado radial (efecto cóncavo 3D profundo). */
 .dial__face {
-  fill: #101318;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.3));
 }
 
 .dial__rim {
   stroke: #2a2e34;
   stroke-width: 2;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
 }
 
 /* Arco base de la escala completa. */
 .dial__arc {
-  stroke: #2a2e34;
+  stroke: #1e2228;
   stroke-width: 10;
-  stroke-linecap: round;
+  stroke-linecap: butt;
 }
 
-/* Arco de nivel actual (cian → naranja según el estado). */
+/* Arco de nivel actual (cian → naranja según el estado).
+   Brillo tipo display de cabina digital. */
 .dial__arc-fill {
   stroke-width: 10;
-  stroke-linecap: round;
-  filter: drop-shadow(0 0 6px rgba(79, 216, 255, 0.55));
-  transition: opacity 0.2s ease;
+  stroke-linecap: butt;
+  filter: drop-shadow(0 0 8px rgba(79, 216, 255, 0.6))
+          drop-shadow(0 0 2px rgba(79, 216, 255, 0.3));
+  transition: opacity 0.15s ease;
 }
 
 .dial--hot .dial__arc-fill {
   opacity: 0;
 }
 
-/* Marcas de escala. */
+/* Marcas de escala (lineales, tipo tacómetro). */
 .dial__tick {
-  stroke: #454c55;
+  stroke: #3a4048;
   stroke-width: 1.5;
 }
 
 .dial__tick--major {
-  stroke: #7a838d;
+  stroke: #6a737d;
   stroke-width: 2.5;
 }
 
-/* Aguja y cubo central. */
+/* Aguja y cubo central — estilo analógico sobre pantalla. */
 .dial__needle {
   stroke: var(--color-accent);
   stroke-width: 4;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 8px rgba(255, 74, 31, 0.6));
+  filter: drop-shadow(0 0 10px rgba(255, 74, 31, 0.7))
+          drop-shadow(0 0 3px rgba(255, 74, 31, 0.4));
+  transition: d 0.08s ease-out;
 }
 
 .dial__hub {
   fill: #0b0d0f;
-  stroke: #7a838d;
+  stroke: #4a525c;
   stroke-width: 2;
+  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
 }
 
 /* Lectura digital superpuesta al centro del dial. */
@@ -81,13 +89,17 @@
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--color-text);
-  text-shadow: 0 0 12px rgba(79, 216, 255, 0.35);
-  transition: color 0.15s ease;
+  text-shadow:
+    0 0 16px rgba(79, 216, 255, 0.4),
+    0 0 4px rgba(79, 216, 255, 0.2);
+  transition: color 0.15s ease, text-shadow 0.15s ease;
 }
 
 .dial--hot .dial__value {
   color: var(--color-accent);
-  text-shadow: 0 0 14px rgba(255, 74, 31, 0.5);
+  text-shadow:
+    0 0 16px rgba(255, 74, 31, 0.6),
+    0 0 4px rgba(255, 74, 31, 0.3);
 }
 
 .dial__unit {

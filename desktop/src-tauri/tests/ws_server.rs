@@ -8,6 +8,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use voxlfa_core::protocol::{EngineEvent, LevelSample};
+use voxlfa_core::telemetry;
 use voxlfa_desktop_lib::engine::EngineManager;
 use voxlfa_desktop_lib::pairing::{PairingState, MAX_FAILED_ATTEMPTS};
 use voxlfa_desktop_lib::ws::run_ws_server;
@@ -26,7 +27,11 @@ async fn start_server() -> (u16, broadcast::Sender<String>) {
     let sender = events.clone();
     let (pairing_events, _) = broadcast::channel(16);
     let pairing = Arc::new(Mutex::new(PairingState::with_code(TEST_CODE.to_string())));
-    let engine = Arc::new(Mutex::new(EngineManager::new(events.clone())));
+    let (telemetry_handle, _rx) = telemetry::channel();
+    let engine = Arc::new(Mutex::new(EngineManager::new(
+        events.clone(),
+        telemetry_handle,
+    )));
     tokio::spawn(run_ws_server(events, pairing, pairing_events, engine, port));
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     (port, sender)

@@ -10,18 +10,67 @@
 
 use std::sync::{mpsc, Arc, Mutex};
 
+#[cfg(feature = "rnnoise")]
+use crate::dsp::RnnoiseDenoise;
 use crate::dsp::{
-    AudioProcessor, BoomSuppressor, Compressor, DeEsser, Delay, Gain, HighPass, Limiter, NoiseGate,
-    Notch, ParametricEq, ProcessResult, ProcessingInfo, Reverb, Saturator,
+    AudioProcessor, BoomSuppressor, Compressor, DeEsser, Delay, FeedbackSuppressor, Gain, HighPass,
+    Limiter, NoiseGate, Notch, ParametricEq, ProcessResult, ProcessingInfo, Reverb, Saturator,
 };
 use crate::error::Error;
 use crate::protocol::{
-    DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent, EqBand, NoiseGateParams,
-    PresetId,
+    DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent, EqBand,
+    FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams, PresetId,
 };
 use crate::Result;
 
 use super::presets::PresetFactory;
+
+/// Envuelve un procesador de denoise y aplica mezcla seco/húmedo.
+///
+/// Se usa para el parámetro `mix` de `Denoise`: 0.0 = paso directo,
+/// 1.0 = denoise completo.
+struct DenoiseMix {
+    inner: Box<dyn AudioProcessor>,
+    mix: f32,
+}
+
+impl DenoiseMix {
+    fn new(inner: Box<dyn AudioProcessor>, mix: f32) -> Self {
+        Self {
+            inner,
+            mix: mix.clamp(0.0, 1.0),
+        }
+    }
+}
+
+impl AudioProcessor for DenoiseMix {
+    fn process(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        info: &ProcessingInfo,
+    ) -> ProcessResult {
+        let frames = input.len().min(output.len());
+        let mut denoised = vec![0.0f32; frames];
+        let result = self.inner.process(input, &mut denoised, info);
+
+        let wet = self.mix;
+        let dry = 1.0 - wet;
+        for i in 0..frames {
+            output[i] = input[i] * dry + denoised[i] * wet;
+        }
+
+        result
+    }
+
+    fn name(&self) -> &'static str {
+        "denoise"
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+}
 
 /// Un eslabón de la cadena: procesador + su estado frente al bypass.
 struct ChainLink {
@@ -39,6 +88,14 @@ struct ChainLink {
     /// Parámetros actuales de la puerta de ruido si este eslabón es el gate;
     /// `None` si no. Se reemplaza junto con el procesador en los ajustes en vivo.
     gate_params: Option<NoiseGateParams>,
+    /// Parámetros actuales de denoise si este eslabón es denoise; `None` si no.
+    denoise_params: Option<DenoiseParams>,
+    /// Parámetros actuales de feedback suppressor si este eslabón es feedback;
+    /// `None` si no.
+    feedback_params: Option<FeedbackSuppressorParams>,
+    /// Parámetros actuales de corrección de tono si este eslabón es pitch
+    /// correction; `None` si no.
+    pitch_correction_params: Option<PitchCorrectionParams>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -84,6 +141,9 @@ impl ChainProcessor {
             .map(|spec| {
                 let eq_bands = eq_bands_of(&spec.kind);
                 let gate_params = gate_params_of(&spec.kind);
+                let denoise_params = denoise_params_of(&spec.kind);
+                let feedback_params = feedback_params_of(&spec.kind);
+                let pitch_correction_params = pitch_correction_params_of(&spec.kind);
                 ChainLink {
                     name: module_name(&spec.kind),
                     enabled: spec.enabled,
@@ -91,6 +151,9 @@ impl ChainProcessor {
                     processor: build_processor(spec, self.sample_rate, self.max_frames),
                     eq_bands,
                     gate_params,
+                    denoise_params,
+                    feedback_params,
+                    pitch_correction_params,
                 }
             })
             .collect();
@@ -157,6 +220,64 @@ impl ChainProcessor {
         }
     }
 
+    /// Reemplaza el procesador de denoise por uno ya construido.
+    ///
+    /// Devuelve `true` si el módulo existe y se actualizó.
+    pub fn set_link_denoise(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: DenoiseParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "denoise") {
+            Some(link) => {
+                link.processor = processor;
+                link.denoise_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Reemplaza el procesador de feedback suppressor por uno ya construido.
+    ///
+    /// Devuelve `true` si el módulo existe y se actualizó.
+    pub fn set_link_feedback(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: FeedbackSuppressorParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "feedback") {
+            Some(link) => {
+                link.processor = processor;
+                link.feedback_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Reemplaza el procesador de corrección de tono por uno ya construido.
+    ///
+    /// Devuelve `true` si el módulo existe y se actualizó.
+    pub fn set_link_pitch_correction(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: PitchCorrectionParams,
+    ) -> bool {
+        match self
+            .links
+            .iter_mut()
+            .find(|link| link.name == "pitch_correction")
+        {
+            Some(link) => {
+                link.processor = processor;
+                link.pitch_correction_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -171,6 +292,9 @@ impl ChainProcessor {
                     bypass: link.bypass,
                     eq_bands: link.eq_bands.clone(),
                     gate_params: link.gate_params,
+                    denoise_params: link.denoise_params,
+                    feedback_params: link.feedback_params,
+                    pitch_correction_params: link.pitch_correction_params,
                 })
                 .collect(),
         }
@@ -264,6 +388,27 @@ pub enum DspCommand {
         /// Parámetros actuales del gate para el estado de la cadena.
         params: NoiseGateParams,
     },
+    /// Reemplazar el procesador de denoise (ajuste en vivo de mix).
+    SetDenoise {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de denoise para el estado de la cadena.
+        params: DenoiseParams,
+    },
+    /// Reemplazar el procesador de feedback suppressor (ajuste en vivo).
+    SetFeedbackSuppressor {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de feedback para el estado de la cadena.
+        params: FeedbackSuppressorParams,
+    },
+    /// Reemplazar el procesador de corrección de tono (ajuste en vivo).
+    SetPitchCorrection {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de pitch correction para el estado de la cadena.
+        params: PitchCorrectionParams,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -303,6 +448,9 @@ impl DspHandle {
                     bypass: false,
                     eq_bands: eq_bands_of(&spec.kind),
                     gate_params: gate_params_of(&spec.kind),
+                    denoise_params: denoise_params_of(&spec.kind),
+                    feedback_params: feedback_params_of(&spec.kind),
+                    pitch_correction_params: pitch_correction_params_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -433,6 +581,87 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Ajusta la mezcla seco/húmedo del denoise del preset activo en vivo.
+    ///
+    /// El nuevo `DenoiseMix` se construye aquí (hilo de control) con el mix
+    /// indicado y se envía ya listo al hilo de audio, que solo intercambia el
+    /// puntero. Devuelve error si el preset actual no tiene denoise.
+    pub fn set_denoise(&self, params: DenoiseParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "denoise")
+            .ok_or_else(|| Error::audio("el preset actual no tiene denoise"))?;
+        link.denoise_params = Some(params);
+
+        let inner: Box<dyn AudioProcessor> = {
+            #[cfg(feature = "rnnoise")]
+            {
+                Box::new(RnnoiseDenoise::new())
+            }
+            #[cfg(not(feature = "rnnoise"))]
+            {
+                Box::new(super::passthrough::PassThroughProcessor::default())
+            }
+        };
+        let processor = DenoiseMix::new(inner, params.mix);
+        self.send(DspCommand::SetDenoise {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
+    /// Ajusta los parámetros del feedback suppressor del preset activo en vivo.
+    ///
+    /// El nuevo `FeedbackSuppressor` se construye aquí (hilo de control) con
+    /// los parámetros indicados y se envía ya listo al hilo de audio, que solo
+    /// intercambia el puntero. Devuelve error si el preset actual no tiene
+    /// feedback suppressor.
+    pub fn set_feedback(&self, params: FeedbackSuppressorParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "feedback")
+            .ok_or_else(|| Error::audio("el preset actual no tiene feedback suppressor"))?;
+        link.feedback_params = Some(params);
+
+        let processor = FeedbackSuppressor::new(params.threshold_db, params.q, self.sample_rate);
+        self.send(DspCommand::SetFeedbackSuppressor {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
+    /// Ajusta los parámetros de corrección de tono del preset activo en vivo.
+    ///
+    /// El nuevo `PitchCorrection` se construye aquí (hilo de control) con los
+    /// parámetros indicados y se envía ya listo al hilo de audio, que solo
+    /// intercambia el puntero. Devuelve error si el preset actual no tiene
+    /// pitch correction.
+    pub fn set_pitch_correction(&self, params: PitchCorrectionParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "pitch_correction")
+            .ok_or_else(|| Error::audio("el preset actual no tiene corrección de tono"))?;
+        link.pitch_correction_params = Some(params);
+
+        let processor = super::pitch_correction::PitchCorrection::new(params);
+        self.send(DspCommand::SetPitchCorrection {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -472,6 +701,9 @@ fn module_name(kind: &DspModuleKind) -> &'static str {
         DspModuleKind::Delay { .. } => "delay",
         DspModuleKind::Reverb { .. } => "reverb",
         DspModuleKind::Limiter { .. } => "limiter",
+        DspModuleKind::Denoise { .. } => "denoise",
+        DspModuleKind::FeedbackSuppressor { .. } => "feedback",
+        DspModuleKind::PitchCorrection { .. } => "pitch_correction",
     }
 }
 
@@ -499,6 +731,46 @@ fn gate_params_of(kind: &DspModuleKind) -> Option<NoiseGateParams> {
             release_ms: *release_ms,
             hold_ms: *hold_ms,
             range_db: *range_db,
+        }),
+        _ => None,
+    }
+}
+
+/// Parámetros de denoise de una especificación de módulo, o `None` si no es
+/// denoise.
+fn denoise_params_of(kind: &DspModuleKind) -> Option<DenoiseParams> {
+    match kind {
+        DspModuleKind::Denoise { mix } => Some(DenoiseParams { mix: *mix }),
+        _ => None,
+    }
+}
+
+/// Parámetros de feedback suppressor de una especificación de módulo, o `None`
+/// si no es feedback.
+fn feedback_params_of(kind: &DspModuleKind) -> Option<FeedbackSuppressorParams> {
+    match kind {
+        DspModuleKind::FeedbackSuppressor { threshold_db, q } => Some(FeedbackSuppressorParams {
+            threshold_db: *threshold_db,
+            q: *q,
+        }),
+        _ => None,
+    }
+}
+
+/// Parámetros de corrección de tono de una especificación de módulo, o `None`
+/// si no es pitch correction.
+fn pitch_correction_params_of(kind: &DspModuleKind) -> Option<PitchCorrectionParams> {
+    match kind {
+        DspModuleKind::PitchCorrection {
+            scale,
+            root,
+            strength,
+            mix,
+        } => Some(PitchCorrectionParams {
+            scale: *scale,
+            root: *root,
+            strength: *strength,
+            mix: *mix,
         }),
         _ => None,
     }
@@ -583,6 +855,56 @@ fn build_processor(
             release_ms,
             sample_rate,
         )),
+        DspModuleKind::Denoise { mix } => {
+            // Preferir ONNX DeepFilterNet3 si los modelos están disponibles;
+            // en caso contrario, usar RNNoise (puro Rust, modelo embebido).
+            #[cfg(feature = "onnx")]
+            {
+                if let Some(dir) = crate::models::models_dir() {
+                    if crate::models::ModelStatus::check(&dir).available {
+                        match crate::dsp::denoise_onnx::OnnxDenoise::new(dir) {
+                            Ok(processor) => {
+                                return Box::new(DenoiseMix::new(Box::new(processor), mix));
+                            }
+                            Err(e) => {
+                                log::warn!("ONNX denoise init failed, falling back: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+            #[cfg(feature = "rnnoise")]
+            {
+                Box::new(DenoiseMix::new(Box::new(RnnoiseDenoise::new()), mix))
+            }
+            #[cfg(not(feature = "rnnoise"))]
+            {
+                let _ = (sample_rate, max_frames);
+                Box::new(DenoiseMix::new(
+                    Box::new(super::passthrough::PassThroughProcessor::default()),
+                    mix,
+                ))
+            }
+        }
+        DspModuleKind::FeedbackSuppressor { threshold_db, q } => {
+            let _ = max_frames;
+            Box::new(FeedbackSuppressor::new(threshold_db, q, sample_rate))
+        }
+        DspModuleKind::PitchCorrection {
+            scale,
+            root,
+            strength,
+            mix,
+        } => {
+            let _ = max_frames;
+            let params = PitchCorrectionParams {
+                scale,
+                root,
+                strength,
+                mix,
+            };
+            Box::new(super::pitch_correction::PitchCorrection::new(params))
+        }
     }
 }
 

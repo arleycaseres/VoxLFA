@@ -9,7 +9,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::dsp::DspHandle;
 use crate::error::Error;
-use crate::protocol::{AnalysisSample, SessionSummary, SuggestionAction};
+use crate::protocol::{
+    AnalysisSample, DenoiseParams, FeedbackSuppressorParams, PitchCorrectionParams, SessionSummary,
+    SuggestionAction,
+};
 use crate::Result;
 
 /// Estado de análisis compartido entre el hilo de análisis y la UI.
@@ -71,6 +74,27 @@ impl AnalysisHandle {
         match &suggestion.action {
             SuggestionAction::None => Ok(()),
             SuggestionAction::ApplyPreset { preset } => self.dsp.apply_preset(*preset),
+            SuggestionAction::SetEqBand {
+                band_index,
+                gain_db,
+            } => self.dsp.set_eq_band(*band_index as usize, *gain_db),
+            SuggestionAction::SetDenoise { mix } => {
+                self.dsp.set_denoise(DenoiseParams { mix: *mix })
+            }
+            SuggestionAction::SetFeedback { threshold_db, q } => {
+                self.dsp.set_feedback(FeedbackSuppressorParams {
+                    threshold_db: *threshold_db,
+                    q: *q,
+                })
+            }
+            SuggestionAction::SetPitchCorrection { strength, mix } => {
+                self.dsp.set_pitch_correction(PitchCorrectionParams {
+                    scale: crate::protocol::MusicalScale::Chromatic,
+                    root: crate::protocol::MusicalNote::C,
+                    strength: *strength,
+                    mix: *mix,
+                })
+            }
         }
     }
 }

@@ -7,7 +7,12 @@
   --color-bg: #0b0d0f;
   --color-panel: #16181c;
   --color-panel-2: #1e2228;
+  --color-bg-panel: #16181c;
   --color-border: #2a2e34;
+  --color-track: #2a2e34;
+
+  /* Bordes angulares (estilo cabina) */
+  --radius: 0;
 
   /* Acentos de marca */
   --color-accent: #ff4a1f;

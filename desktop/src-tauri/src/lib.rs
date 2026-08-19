@@ -15,6 +15,7 @@
 //! Este crate **no** contiene lógica de audio: toda vive en `voxlfa-core`.
 
 pub mod engine;
+pub mod llm;
 pub mod mdns;
 pub mod pairing;
 pub mod ws;

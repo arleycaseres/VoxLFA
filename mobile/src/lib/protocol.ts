@@ -24,6 +24,8 @@ export interface EngineStatus {
   sampleRate: number;
   bufferSize: number;
   latencyMs: number;
+  /** Host de audio activo (p. ej. `"alsa"`, `"jack"`). */
+  audioHost: string | null;
   inputDevice: string | null;
   outputDevice: string | null;
 }
@@ -79,6 +81,24 @@ export interface NoiseGateParams {
   rangeDb: number;
 }
 
+/** Nota musical raíz para la escala de corrección de tono. */
+export type MusicalNote =
+  | "c" | "cs" | "d" | "ds" | "e" | "f"
+  | "fs" | "g" | "gs" | "a" | "as" | "b";
+
+/** Escala musical para la corrección de tono. */
+export type MusicalScale =
+  | "chromatic" | "major" | "minorNatural" | "minorHarmonic"
+  | "pentatonicMajor" | "pentatonicMinor" | "blues";
+
+/** Parámetros de corrección de tono. */
+export interface PitchCorrectionParams {
+  scale: MusicalScale;
+  root: MusicalNote;
+  strength: number;
+  mix: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -88,6 +108,8 @@ export interface DspLinkState {
   eqBands: EqBand[] | null;
   /** Parámetros actuales de la puerta si este módulo es la puerta; si no, `null`. */
   gateParams: NoiseGateParams | null;
+  /** Parámetros de pitch correction si este módulo es pitch correction; si no, `null`. */
+  pitchCorrectionParams: PitchCorrectionParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -120,12 +142,17 @@ export type SuggestionKind =
   | "timbre"
   | "dynamics"
   | "fatigue"
-  | "resonance";
+  | "resonance"
+  | "aiAdvisor";
 
 /** Acción confirmable que acompaña a una sugerencia. */
 export type SuggestionAction =
   | { type: "none" }
-  | { type: "applyPreset"; preset: PresetId };
+  | { type: "applyPreset"; preset: PresetId }
+  | { type: "setEqBand"; bandIndex: number; gainDb: number }
+  | { type: "setDenoise"; mix: number }
+  | { type: "setFeedback"; thresholdDb: number; q: number }
+  | { type: "setPitchCorrection"; strength: number; mix: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {

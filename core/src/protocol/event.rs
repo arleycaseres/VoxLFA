@@ -31,6 +31,23 @@ pub struct AudioDeviceInfo {
     pub is_default: bool,
 }
 
+/// Descripción de un host de audio disponible (ALSA, JACK, PipeWire, etc.).
+///
+/// Los hosts representan los backends de audio del sistema operativo. Cada host
+/// tiene su propio conjunto de dispositivos; cambiar de host permite acceder a
+/// interfaces de audio profesionales (JACK) o al stack moderno de Linux
+/// (PipeWire) sin competir con el backend predeterminado (ALSA/WASAPI).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioHostInfo {
+    /// Identificador del host (p. ej. `"alsa"`, `"jack"`, `"pipewire"`).
+    pub id: String,
+    /// Nombre legible para la UI (p. ej. `"ALSA"`, `"JACK"`, `"PipeWire"`).
+    pub name: String,
+    /// `true` si el sistema lo tiene como predeterminado.
+    pub is_default: bool,
+}
+
 /// Número fijo de bandas logarítmicas del espectro emitido por el motor.
 ///
 /// El motor calcula una FFT sobre la entrada y reduce el resultado a estas
@@ -82,6 +99,8 @@ pub struct EngineStatus {
     pub buffer_size: usize,
     /// Latencia medida captura→salida en milisegundos.
     pub latency_ms: f32,
+    /// Host de audio activo (p. ej. `"alsa"`, `"jack"`).
+    pub audio_host: Option<String>,
     /// Nombre del dispositivo de entrada en uso (si hay).
     pub input_device: Option<String>,
     /// Nombre del dispositivo de salida en uso (si hay).

@@ -32,6 +32,11 @@ default = []
 # Habilita el motor de audio en tiempo real (captura → procesado → salida)
 # basado en cpal y el buffer de anillo lock-free.
 audio = ["dep:cpal", "dep:ringbuf"]
+# Supresión de ruido con RNNoise (nnnoiseless, puro Rust, modelo embebido).
+rnnoise = ["dep:nnnoiseless"]
+# Supresión de ruido con ONNX Runtime + DeepFilterNet3 (mejor calidad, más
+# peso). Requiere descargar binarios de ONNX Runtime en la primera compilación.
+onnx = ["dep:ort", "dep:ndarray", "dep:ureq"]
 
 [dependencies]
 serde.workspace = true
@@ -39,5 +44,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 rustfft.workspace = true
 
-cpal = { version = "0.16", optional = true }
+cpal = { version = "0.16", optional = true, features = ["jack"] }
 ringbuf = { version = "0.4", optional = true }
+nnnoiseless = { version = "0.5", optional = true }
+ort = { version = "=2.0.0-rc.13", features = ["download-binaries"], optional = true }
+ndarray = { version = "0.15", optional = true }
+ureq = { version = "3", optional = true }

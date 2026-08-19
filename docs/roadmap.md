@@ -193,7 +193,127 @@ volver a conectar el mismo dispositivo.
 
 ## Fase 3+ — Pulido y distribución
 
-- [ ] Paquetes de instalación (deb/AppImage/msi, APK).
+- [x] Paquetes de instalación (deb/AppImage/msi/dmg/APK): workflow de GitHub Actions
+      (`.github/workflows/release.yml`) que construye automáticamente para
+      Linux (.deb + .AppImage), Windows (.msi + .exe), macOS (.dmg, universal
+      binary) y Android (APK vía EAS Build) al hacer `git tag v*`. Artefactos
+      publicados como GitHub Release.
 - [ ] Navegación mDNS nativa desde el móvil (opcional): el escritorio ya se
       anuncia; solo faltaría un cliente DNS-SD nativo (requiere dev build).
-- [ ] Telemetría opcional y anónima (con consentimiento y CSP acotada).
+- [x] Telemetría opcional y anónima (con consentimiento y CSP acotada):
+      módulo `telemetry` en `voxlfa-core` con eventos tipados (app started,
+      session started/ended, module toggled, consent changed) y cola `mpsc`
+      thread-safe. El `EngineManager` emite eventos al arrancar/detener el
+      motor y al cambiar de preset. Consentimiento opt-in con diálogo en la
+      cabina (primera vez) y persistencia en `config.json`. Envío HTTP con
+      `reqwest::blocking` en un hilo dedicado; endpoint configurable via
+      constante `TELEMETRY_ENDPOINT` (vacío = desactivado, solo debug log).
+      Payload JSON por evento, timeout 5 s, errores best-effort a stderr.
+- [x] Empaquetado y descarga de modelos ONNX: módulo `models.rs` en
+      `voxlfa-core` con `ModelStatus`, `models_dir()` (XDG/Linux, macOS,
+      Windows), `download_models()` desde assets de GitHub releases, y
+      `download_file()` con `ureq`. Comandos Tauri `get_model_status` y
+      `download_models` (con eventos `model-download-progress`). UI:
+      `ModelManager.tsx` con estado de archivos, barra de progreso y botón
+      de descarga. Denoise auto-detecta modelos y cae a RNNoise o
+      passthrough si no están.
+
+## Fase 2 ONNX — Denoise + Feedback ✅
+
+Objetivo: supresión de ruido de alta calidad (ONNX DeepFilterNet3) y
+supresión de feedback adaptativa.
+
+- [x] Denoise RNNoise (`denoise.rs`): módulo `RnnoiseDenoise` con 480 muestras
+      por frame, escala I16, descarte de fade-in, integrado en la cadena con
+      `DenoiseMix` (wet/dry). Feature `rnnoise`.
+- [x] Denoise ONNX (`denoise_onnx.rs`): pipeline completo de DeepFilterNet3:
+      STFT/ISTFT con ventana Hann y overlap-add, filtro ERB (32 bandas,
+      Glasberg & Moore), 3 sesiones ONNX (encoder, ERB decoder, DF decoder),
+      normalización exponencial móvil, máscara ERB + coeficientes DF. Feature
+      `onnx`. Fallback a passthrough si los modelos no existen.
+- [x] Supresión de feedback adaptativa (`feedback.rs`): análisis FFT de 2048
+      puntos con ventana Hann, detección de picos por umbral, hasta 4 filtros
+      notch adaptativos con ataque/liberación suavizados.
+- [x] Protocolo: `DenoiseParams`, `FeedbackSuppressorParams` en `protocol/dsp.rs`,
+      variantes `DspModuleKind::Denoise` y `DspModuleKind::FeedbackSuppressor`,
+      comandos `set_denoise` y `set_feedback`.
+- [x] Persistencia: `denoise_params` y `feedback_params` en `DeviceProfile`.
+- [x] UI: paneles `DenoisePanel` (mix) y `FeedbackPanel` (threshold + Q) en
+      la cabina, labels/iconos en `DspChain`.
+- [x] Verificación completa (fmt, clippy, 95 tests, builds desktop y móvil).
+
+> **Empaquetado de modelos**: ver Fase 3+ (descarga desde GitHub releases,
+> UI de gestión en `ModelManager.tsx`).
+
+## Fase 4 — IA: corrección de tono en tiempo real ✅
+
+Objetivo: detectar y corregir el pitch de la voz en tiempo real con latencia
+mínima.
+
+- [x] Detección de pitch con algoritmo **YIN** (`dsp/pitch_correction.rs`):
+      buffer circular de 2048 muestras a 48 kHz, CDF normalizado, umbral 0.15,
+      búsqueda de mínimo local en ventana de 16 tau. No asigna memoria en el
+      callback.
+- [x] Escalas musicales: `MusicalScale` (cromática, mayor, menor natural,
+      menor armónica, pentatónica mayor/menor, blues) y `MusicalNote` (C–B con
+      sostenidos). Selección de la nota más cercana en la escala con wrap-around.
+- [x] Resíntesis **PSOLA** simplificada: detección de épocas por picos de
+      energía, ventanas Hann pitch-sincronizadas, reubicación con el nuevo
+      espaciamiento y overlap-add. Paso directo si la señal es silenciosa.
+- [x] Procesador `PitchCorrection` implementando `AudioProcessor` con parámetros
+      `strength` (0–1), `mix` (seco/húmedo), `scale` y `root`. No asigna
+      memoria en el callback (buffers preasignados).
+- [x] Protocolo: `PitchCorrectionParams`, `MusicalScale`, `MusicalNote` en
+      `protocol/dsp.rs`, variante `DspModuleKind::PitchCorrection`, campo
+      `pitch_correction_params` en `DspLinkState`.
+- [x] Cadena DSP: `set_pitch_correction` en `DspHandle` y `DspCommand`,
+      mapeo en `build_processor`, `module_name`, `pitch_correction_params_of`.
+- [x] Persistencia: `pitch_correction_params` en `DeviceProfile` (`config.rs`),
+      reaplicado al arrancar, guardado al detener.
+- [x] Cabina: comando Tauri `set_pitch_correction` registrado.
+- [x] Desktop TS: tipos `PitchCorrectionParams`, `MusicalScale`, `MusicalNote`
+      en `types.ts`, función `setPitchCorrection` en `tauri.ts` y `mock.ts`.
+- [x] Móvil: tipos espejo en `protocol.ts` (`DspLinkState` con
+      `pitchCorrectionParams`, `PitchCorrectionParams`, `MusicalScale`,
+      `MusicalNote`).
+- [x] Tests: 13 unitarios (detector, escalas, shift ratio, PSOLA passthrough,
+      creación, passthrough a strength/mix 0, intervalos, notas).
+- [x] Verificación completa (fmt, clippy, 120 tests, builds desktop y móvil).
+
+> **Nota de producto**: el plan original advierte que la corrección de tono es la
+> fase técnicamente más difícil y sugiere dejarla para después de tener usuarios
+> reales. Se implementa aquí porque la arquitectura estaba lista y la detección
+> YIN + PSOLA es un camino probado. El `strength` bajo (0.3–0.5) da un efecto
+> sutil tipo "pitch assistance"; valores altos (0.8–1.0) dan el efecto
+> Auto-Tune marcado.
+
+## Fase 8 — Interoperabilidad con otras herramientas ✅ (parcial)
+
+Objetivo: que el usuario pueda usar el software junto con ecualizadores físicos
+u otras herramientas externas sin conflictos.
+
+- [x] **Enrutamiento de audio flexible**: `AudioEngineConfig` soporta
+      `input_device`, `output_device` y `audio_host` independientes; el usuario
+      puede intercalar un EQ físico externo entre el micrófono y la entrada del
+      software o entre la salida del software y el amplificador.
+- [x] **Host de audio configurable**: enumeración de hosts disponibles (ALSA,
+      JACK, PipeWire, etc.) con `AudioEngineInfo`, comandos Tauri
+      `list_audio_hosts` / `list_devices_for_host`, selector de host en la
+      configuración persistida (`default_host`).
+- [x] **JACK habilitado**: feature `jack` en cpal para routing profesional
+      multi-dispositivo en Linux (conexión directa entre apps de audio).
+- [x] **Protocolo actualizado**: `EngineStatus` incluye `audio_host`, tipos TS
+      desktop/móvil sincronizados (`AudioHostInfo`, `HostList`,
+      `AppConfig.defaultHost`).
+- [x] **Persistencia**: el host seleccionado se guarda en `config.json` y se
+      reaplica al arrancar.
+- [x] **Móvil**: `MonitorView` muestra el host de audio activo.
+- [x] Verificación completa (fmt, clippy, 163 tests, builds desktop y móvil).
+
+> **VST/AU**: el soporte de plugins VST/AU queda como mejora futura (requiere
+> crates dedicados como `nih_plug` o `vst3-sys` y un UI de gestión de plugins;
+> es un feature significativamente más complejo que el enrutamiento de audio).
+>
+> **Loopback macOS/Windows**: para routing de audio entre apps, el usuario
+> puede usar BlackHole (macOS) o VB-CABLE (Windows) como dispositivos
+> virtuales; VoxLFA los detecta y lista normalmente.

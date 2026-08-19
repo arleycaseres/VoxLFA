@@ -10,16 +10,22 @@ import * as mock from "./mock";
 import type {
   AnalysisSample,
   AppConfig,
+  DenoiseParams,
   DeviceList,
   DspState,
   EngineEvent,
   EngineStatus,
+  FeedbackSuppressorParams,
+  HostList,
   LevelSample,
+  ModelStatus,
   NoiseGateParams,
+  PitchCorrectionParams,
   PresetId,
   PresetInfo,
   SessionSummary,
   SpectrumSample,
+  Suggestion,
 } from "./types";
 
 /** `true` dentro de la ventana real de Tauri; `false` en un navegador plano. */
@@ -48,15 +54,31 @@ export function listDevices(): Promise<DeviceList> {
   return inTauri() ? invoke<DeviceList>("list_devices") : mock.listDevices();
 }
 
+/** Lista los hosts de audio disponibles (ALSA, JACK, PipeWire, etc.). */
+export function listAudioHosts(): Promise<HostList> {
+  return inTauri()
+    ? invoke<HostList>("list_audio_hosts")
+    : mock.listAudioHosts();
+}
+
+/** Lista los dispositivos de un host específico. */
+export function listDevicesForHost(hostId: string): Promise<DeviceList> {
+  return inTauri()
+    ? invoke<DeviceList>("list_devices_for_host", { hostId })
+    : mock.listDevices();
+}
+
 /** Arranca el motor con los dispositivos dados (`null` = predeterminado).
- *  `bufferSize` (`null` = auto por heurística de dispositivo). */
+ *  `bufferSize` (`null` = auto por heurística de dispositivo).
+ *  `audioHost` (`null` = predeterminado del sistema; p. ej. `"jack"`, `"alsa"`). */
 export function startEngine(
   inputDevice: string | null,
   outputDevice: string | null,
   bufferSize?: number | null,
+  audioHost?: string | null,
 ): Promise<void> {
   return inTauri()
-    ? invoke<void>("start_engine", { inputDevice, outputDevice, bufferSize })
+    ? invoke<void>("start_engine", { inputDevice, outputDevice, bufferSize, audioHost })
     : mock.startEngine(bufferSize);
 }
 
@@ -143,6 +165,21 @@ export function setNoiseGate(params: NoiseGateParams): Promise<void> {
   return inTauri() ? invoke<void>("set_noise_gate", { params }) : mock.setNoiseGate(params);
 }
 
+/** Ajusta la mezcla seco/húmedo del denoise del preset activo en vivo. */
+export function setDenoise(params: DenoiseParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_denoise", { params }) : mock.setDenoise(params);
+}
+
+/** Ajusta los parámetros del feedback suppressor en vivo. */
+export function setFeedback(params: FeedbackSuppressorParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_feedback", { params }) : mock.setFeedback(params);
+}
+
+/** Ajusta los parámetros de corrección de tono en vivo. */
+export function setPitchCorrection(params: PitchCorrectionParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_pitch_correction", { params }) : mock.setPitchCorrection(params);
+}
+
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */
 export function getAnalysis(): Promise<AnalysisSample | null> {
   return inTauri()
@@ -162,6 +199,50 @@ export function applySuggestion(suggestionId: number): Promise<void> {
   return inTauri()
     ? invoke<void>("apply_suggestion", { suggestionId })
     : mock.applySuggestion(suggestionId);
+}
+
+/** Pide sugerencias al asesor de IA (Groq) con las métricas actuales. */
+export function requestAiSuggestions(): Promise<Suggestion[]> {
+  return inTauri()
+    ? invoke<Suggestion[]>("request_ai_suggestions")
+    : mock.requestAiSuggestions();
+}
+
+/** Devuelve las últimas sugerencias del asesor de IA. */
+export function getAiSuggestions(): Promise<Suggestion[]> {
+  return inTauri()
+    ? invoke<Suggestion[]>("get_ai_suggestions")
+    : mock.getAiSuggestions();
+}
+
+/** Devuelve el estado del consentimiento de telemetría. */
+export function getTelemetryConsent(): Promise<boolean | null> {
+  return inTauri()
+    ? invoke<boolean | null>("get_telemetry_consent")
+    : mock.getTelemetryConsent();
+}
+
+/** Establece el consentimiento de telemetría (opt-in / opt-out). */
+export function setTelemetryConsent(enabled: boolean): Promise<void> {
+  return inTauri()
+    ? invoke<void>("set_telemetry_consent", { enabled })
+    : mock.setTelemetryConsent(enabled);
+}
+
+export type { ModelStatus } from "./types";
+
+/** Comprueba si los modelos ONNX están descargados. */
+export function getModelStatus(): Promise<ModelStatus> {
+  return inTauri()
+    ? invoke<ModelStatus>("get_model_status")
+    : mock.getModelStatus();
+}
+
+/** Descarga los modelos ONNX desde los assets de GitHub. */
+export function downloadModels(): Promise<ModelStatus> {
+  return inTauri()
+    ? invoke<ModelStatus>("download_models")
+    : mock.downloadModels();
 }
 
 /**
@@ -187,4 +268,17 @@ export async function onPairingEvent(
   return inTauri()
     ? listen<string>("pairing-event", (event) => handler(event.payload))
     : (mock.onPairingEvent(handler) as UnlistenFn);
+}
+
+/** Se suscribe al progreso de descarga de modelos ONNX. */
+export async function onModelDownloadProgress(
+  handler: (progress: { step: number; total: number }) => void,
+): Promise<UnlistenFn> {
+  if (!inTauri()) {
+    return () => {};
+  }
+  return listen<{ step: number; total: number }>(
+    "model-download-progress",
+    (event) => handler(event.payload),
+  );
 }

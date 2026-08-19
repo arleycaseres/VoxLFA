@@ -88,11 +88,16 @@ impl PresetFactory {
     }
 }
 
-/// Voz limpia: pasa-altos, puerta de ruido, antifeedback (boominess), EQ suave,
-/// de-esser, compresor transparente y limiter.
+/// Voz limpia: pasa-altos, denoise, feedback, puerta de ruido, antifeedback
+/// (boominess), EQ suave, de-esser, compresor transparente y limiter.
 fn voce_limpia() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 80.0 }),
+        module(DspModuleKind::Denoise { mix: 1.0 }),
+        module(DspModuleKind::FeedbackSuppressor {
+            threshold_db: -30.0,
+            q: 10.0,
+        }),
         module(DspModuleKind::NoiseGate {
             threshold_db: -50.0,
             attack_ms: 2.0,
@@ -132,11 +137,16 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
     ]
 }
 
-/// Radio: banda estrecha (pasa-altos + shelf de agudos), puerta de ruido,
-/// notch antifeedback, saturación y comp.
+/// Radio: banda estrecha (pasa-altos + shelf de agudos), denoise, feedback,
+/// puerta de ruido, notch antifeedback, saturación y comp.
 fn radio() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 250.0 }),
+        module(DspModuleKind::Denoise { mix: 1.0 }),
+        module(DspModuleKind::FeedbackSuppressor {
+            threshold_db: -30.0,
+            q: 10.0,
+        }),
         module(DspModuleKind::NoiseGate {
             threshold_db: -45.0,
             attack_ms: 1.0,
@@ -173,11 +183,16 @@ fn radio() -> Vec<DspModuleSpec> {
     ]
 }
 
-/// Warm: bajos suaves con puerta de ruido y antifeedback (boominess), presencia
-/// vocal, compresión ligera y toque de reverb.
+/// Warm: bajos suaves con denoise, feedback, puerta de ruido y antifeedback
+/// (boominess), presencia vocal, compresión ligera y toque de reverb.
 fn warm() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 70.0 }),
+        module(DspModuleKind::Denoise { mix: 1.0 }),
+        module(DspModuleKind::FeedbackSuppressor {
+            threshold_db: -30.0,
+            q: 10.0,
+        }),
         module(DspModuleKind::NoiseGate {
             threshold_db: -48.0,
             attack_ms: 3.0,

@@ -34,8 +34,8 @@ use crate::dsp::DspHandle;
 use crate::dsp::{AudioProcessor, ChainProcessor, DspCommand, LevelMeter, ProcessingInfo};
 use crate::error::Error;
 use crate::protocol::{
-    AnalysisSample, AudioDeviceInfo, EngineEvent, EngineState, EngineStatus, LevelSample, PresetId,
-    SpectrumSample, SPECTRUM_BIN_COUNT,
+    AnalysisSample, AudioDeviceInfo, AudioHostInfo, EngineEvent, EngineState, EngineStatus,
+    LevelSample, PresetId, SpectrumSample, SPECTRUM_BIN_COUNT,
 };
 use crate::Result;
 
@@ -87,7 +87,10 @@ pub struct AudioEngineConfig {
     /// Tamaño de buffer objetivo (muestras por callback). `None` → se elige
     /// automáticamente con una heurística según el tipo de dispositivo.
     pub buffer_size: Option<usize>,
-    /// Dispositivo de entrada (micrófono). `None` → predeterminado del sistema.
+    /// Host de audio a usar (p. ej. `"alsa"`, `"jack"`, `"pipewire"`).
+    /// `None` → predeterminado del sistema.
+    pub audio_host: Option<String>,
+    /// Dispositivo de entrada (micrófono). `None` → predeterminado del host.
     pub input_device: Option<String>,
     /// Dispositivo de salida (altavoces/interfaz). `None` → predeterminado.
     pub output_device: Option<String>,
@@ -100,6 +103,7 @@ impl Default for AudioEngineConfig {
         Self {
             sample_rate: 48_000,
             buffer_size: None,
+            audio_host: None,
             input_device: None,
             output_device: None,
             initial_preset: PresetId::Dry,
@@ -152,6 +156,55 @@ impl fmt::Display for Direction {
 pub struct AudioEngine;
 
 impl AudioEngine {
+    /// Enumera los hosts de audio disponibles en el sistema.
+    ///
+    /// Cada host (ALSA, JACK, PipeWire, etc.) tiene su propio conjunto de
+    /// dispositivos. Devuelve la lista de hosts y el identificador del
+    /// predeterminado.
+    pub fn list_hosts() -> Result<(Vec<AudioHostInfo>, String)> {
+        let default_host_id = cpal::default_host().id();
+        let hosts: Vec<AudioHostInfo> = cpal::available_hosts()
+            .into_iter()
+            .map(|id| {
+                let name = id.name().to_string();
+                let is_default = id == default_host_id;
+                AudioHostInfo {
+                    id: name.to_lowercase(),
+                    name,
+                    is_default,
+                }
+            })
+            .collect();
+        let default_id = default_host_id.name().to_lowercase();
+        Ok((hosts, default_id))
+    }
+
+    /// Enumera los dispositivos de entrada y salida de un host específico.
+    ///
+    /// Si el `host_id` no es válido, devuelve un error. Esto permite al
+    /// usuario elegir dispositivos de un backend concreto (p. ej. JACK para
+    /// routing profesional en Linux).
+    pub fn list_devices_for_host(
+        host_id: &str,
+    ) -> Result<(Vec<AudioDeviceInfo>, Vec<AudioDeviceInfo>)> {
+        let host = resolve_host(host_id)?;
+
+        let default_input = host.default_input_device().and_then(|d| d.name().ok());
+        let default_output = host.default_output_device().and_then(|d| d.name().ok());
+
+        let inputs = host
+            .input_devices()
+            .map_err(|e| Error::audio(format!("list input devices for {host_id}: {e}")))?;
+        let outputs = host
+            .output_devices()
+            .map_err(|e| Error::audio(format!("list output devices for {host_id}: {e}")))?;
+
+        Ok((
+            collect_devices(inputs, default_input)?,
+            collect_devices(outputs, default_output)?,
+        ))
+    }
+
     /// Enumera los dispositivos de entrada y salida disponibles en el sistema.
     ///
     /// Devuelve `(inputs, outputs)`; cada dispositivo marca si es el
@@ -190,9 +243,13 @@ impl AudioEngine {
         config: AudioEngineConfig,
         tx: mpsc::Sender<EngineEvent>,
     ) -> Result<(EngineHandle, DspHandle, AnalysisHandle)> {
-        let host = cpal::default_host();
+        // Resolver el host de audio: el elegido o el predeterminado del sistema.
+        let host = match &config.audio_host {
+            Some(host_id) => resolve_host(host_id)?,
+            None => cpal::default_host(),
+        };
 
-        // Resolver dispositivos: por nombre o los predeterminados del sistema.
+        // Resolver dispositivos: por nombre o los predeterminados del host.
         let input = resolve_device(&host, config.input_device.as_deref(), Direction::Input)?;
         let output = resolve_device(&host, config.output_device.as_deref(), Direction::Output)?;
 
@@ -303,6 +360,15 @@ impl AudioEngine {
                             }
                             DspCommand::SetLinkGate { processor, params } => {
                                 chain.set_link_gate(processor, params);
+                            }
+                            DspCommand::SetDenoise { processor, params } => {
+                                chain.set_link_denoise(processor, params);
+                            }
+                            DspCommand::SetFeedbackSuppressor { processor, params } => {
+                                chain.set_link_feedback(processor, params);
+                            }
+                            DspCommand::SetPitchCorrection { processor, params } => {
+                                chain.set_link_pitch_correction(processor, params);
                             }
                         }
                     }
@@ -472,6 +538,7 @@ impl AudioEngine {
         };
 
         // --- Hilo del motor: mantiene vivos los streams y gestiona el ciclo ---
+        let host_name = config.audio_host.clone();
         let tx_thread = tx.clone();
         let stop_thread = stop.clone();
         let thread = thread::Builder::new()
@@ -487,6 +554,7 @@ impl AudioEngine {
                     sample_rate,
                     buffer_size,
                     0.0,
+                    host_name,
                     Some(input_name),
                     Some(output_name),
                 ));
@@ -503,6 +571,7 @@ impl AudioEngine {
                     sample_rate,
                     buffer_size,
                     0.0,
+                    None,
                     None,
                     None,
                 ));
@@ -585,6 +654,7 @@ fn status_event(
     sample_rate: u32,
     buffer_size: usize,
     latency_ms: f32,
+    audio_host: Option<String>,
     input_device: Option<String>,
     output_device: Option<String>,
 ) -> EngineEvent {
@@ -593,6 +663,7 @@ fn status_event(
         sample_rate,
         buffer_size,
         latency_ms,
+        audio_host,
         input_device,
         output_device,
     })
@@ -627,6 +698,25 @@ fn find_device(host: &cpal::Host, name: &str, direction: Direction) -> Option<cp
     devices
         .into_iter()
         .find_map(|device| device.name().ok().filter(|n| n == name).map(|_| device))
+}
+
+/// Resuelve un host de audio por su ID (nombre en minúsculas, p. ej. `"alsa"`,
+/// `"jack"`, `"pipewire"`).
+///
+/// El `HostId` de cpal es un enum; este helper hace la conversión desde string
+/// comparando con los hosts disponibles. Devuelve error si el ID no corresponde
+/// a ningún host registrado.
+fn resolve_host(host_id: &str) -> Result<cpal::Host> {
+    let available = cpal::available_hosts();
+    let target = available
+        .into_iter()
+        .find(|id| id.name().to_lowercase() == host_id);
+    match target {
+        Some(id) => {
+            cpal::host_from_id(id).map_err(|e| Error::audio(format!("create host {host_id}: {e}")))
+        }
+        None => Err(Error::audio(format!("unknown audio host: {host_id}"))),
+    }
 }
 
 /// Elige una frecuencia de muestreo compatible con ambos dispositivos.

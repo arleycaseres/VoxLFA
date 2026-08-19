@@ -1,14 +1,19 @@
-/* Visualizador de espectro (Fase 5). El lienzo se redimensiona al contenedor;
-   la altura se fija aquí para que las barras tengan una escala estable. */
+/* Visualizador de espectro (Fase 5) — estilo "RPM de la voz" integrado
+   en la cabina. El lienzo se redimensiona al contenedor; la altura se fija
+   aquí para que las barras tengan una escala estable. */
 
 .spectrum {
   position: relative;
   width: 100%;
   height: 210px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-panel-2);
+  border-radius: 0;
+  background: #0a0c0f;
   overflow: hidden;
+  /* Efecto de profundidad tipo panel de instrumentos */
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.4),
+    inset 0 0 20px rgba(0, 0, 0, 0.2);
 }
 
 .spectrum__canvas {

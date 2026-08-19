@@ -35,6 +35,7 @@ fn engine_event_status_round_trips() {
         sample_rate: 48_000,
         buffer_size: 256,
         latency_ms: 10.0,
+        audio_host: Some("alsa".into()),
         input_device: Some("Mic".into()),
         output_device: None,
     });
@@ -197,6 +198,9 @@ fn engine_event_dsp_serializes_with_type_tag() {
                 q: 1.5,
             }]),
             gate_params: None,
+            denoise_params: None,
+            feedback_params: None,
+            pitch_correction_params: None,
         }],
     });
 

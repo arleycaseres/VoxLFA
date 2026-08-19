@@ -19,7 +19,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::{EqBand, NoiseGateParams, PresetId};
+use crate::protocol::{
+    DenoiseParams, EqBand, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams,
+    PresetId,
+};
 use crate::Result;
 
 /// Clave de perfil cuando se arranca con el dispositivo predeterminado.
@@ -29,6 +32,10 @@ pub const DEFAULT_DEVICE_KEY: &str = "default";
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
+    /// Último host de audio elegido (`None` = predeterminado del sistema).
+    /// Se usa para precargar el selector de hosts de la cabina.
+    #[serde(default)]
+    pub default_host: Option<String>,
     /// Último dispositivo de entrada elegido (`None` = predeterminado del
     /// sistema). Se usa para precargar el selector de la cabina.
     #[serde(default)]
@@ -42,6 +49,10 @@ pub struct AppConfig {
     /// Perfiles guardados, uno por dispositivo de entrada.
     #[serde(default)]
     pub profiles: Vec<DeviceProfile>,
+    /// Consentimiento de telemetría: `Some(true)` = activada,
+    /// `Some(false)` = desactivada, `None` = sin decidir (mostrar diálogo).
+    #[serde(default)]
+    pub telemetry_enabled: Option<bool>,
 }
 
 /// Perfil recordado para un dispositivo de entrada concreto.
@@ -60,6 +71,18 @@ pub struct DeviceProfile {
     /// se ajustaron en vivo; `None` = usar los del preset.
     #[serde(default)]
     pub gate_params: Option<NoiseGateParams>,
+    /// Parámetros de denoise si el preset de este perfil lo tiene y se
+    /// ajustaron en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub denoise_params: Option<DenoiseParams>,
+    /// Parámetros de feedback suppressor si el preset de este perfil lo tiene
+    /// y se ajustaron en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub feedback_params: Option<FeedbackSuppressorParams>,
+    /// Parámetros de corrección de tono si el preset de este perfil lo tiene
+    /// y se ajustaron en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub pitch_correction_params: Option<PitchCorrectionParams>,
     /// `true` si el bypass global estaba activo al guardar.
     #[serde(default)]
     pub global_bypass: bool,
@@ -90,6 +113,9 @@ impl AppConfig {
             preset: PresetId::default(),
             eq_bands: Vec::new(),
             gate_params: None,
+            denoise_params: None,
+            feedback_params: None,
+            pitch_correction_params: None,
             global_bypass: false,
             link_bypass: HashMap::new(),
         });
@@ -277,6 +303,7 @@ mod tests {
         assert!(json.contains("\"preset\":\"warm\""));
         assert!(json.contains("\"eqBands\":[]"));
         assert!(json.contains("\"gateParams\":null"));
+        assert!(json.contains("\"denoiseParams\":null"));
         assert!(json.contains("\"globalBypass\":false"));
         assert!(json.contains("\"linkBypass\":{}"));
     }

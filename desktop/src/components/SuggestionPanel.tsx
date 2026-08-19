@@ -1,13 +1,17 @@
-// Panel del asistente de IA (Fase 2): métricas de voz en vivo, sugerencias
-// accionables con confirmación y resumen de sesión exportable a JSON.
+// Panel del asistente de IA: métricas de voz en vivo, sugerencias
+// accionables con confirmación, asesor IA (Groq) y resumen de sesión
+// exportable a JSON.
 
 import type {
   AnalysisSample,
-  PresetId,
   SessionSummary,
-  Suggestion,
+  Suggestion as RawSuggestion,
 } from "../lib/types";
-import { formatDb } from "../lib/format";
+import type { UiSuggestion } from "../lib/uiTypes";
+import { useEffect, useState } from "react";
+// formatDb no se usa en este panel; se mantiene en otros componentes si es necesario
+import SuggestionList from "./SuggestionList";
+import SessionSummaryFooter from "./SessionSummaryFooter";
 
 interface SuggestionPanelProps {
   /** Última muestra de análisis del motor (o `null` si no corre). */
@@ -20,36 +24,21 @@ interface SuggestionPanelProps {
   onApplySuggestion: (id: number) => void;
   /** Refresca el resumen de sesión desde el backend. */
   onRefreshSummary: () => void;
+  /** Sugerencias generadas por el asesor de IA (Groq). */
+  aiSuggestions: RawSuggestion[];
+  /** Estado de carga del asesor IA. */
+  aiLoading: boolean;
+  /** Error del asesor IA (o vacío). */
+  aiError: string;
+  /** Solicita sugerencias al asesor de IA. */
+  onRequestAi: () => void;
 }
 
 /** Nombre legible de cada área de la voz (en español). */
-const KIND_LABELS: Record<Suggestion["kind"], string> = {
-  timbre: "Timbre",
-  dynamics: "Dinámica",
-  fatigue: "Fatiga",
-  resonance: "Resonancia",
-};
 
-const KIND_ICONS: Record<Suggestion["kind"], string> = {
-  timbre: "✦",
-  dynamics: "⇉",
-  fatigue: "◌",
-  resonance: "≈",
-};
+// preset display names are defined in other modules; not used here
 
-const KIND_COLORS: Record<Suggestion["kind"], string> = {
-  timbre: "var(--color-cyan)",
-  dynamics: "var(--color-cyan)",
-  fatigue: "var(--color-accent)",
-  resonance: "var(--color-accent)",
-};
-
-const PRESET_NAMES: Record<PresetId, string> = {
-  dry: "Sin procesar",
-  vozLimpia: "Voz limpia",
-  radio: "Radio",
-  warm: "Warm",
-};
+/** Descripción legible de una acción de sugerencia para el botón. */
 
 /** Barra de métrica 0–1 con etiqueta y valor porcentual. */
 function MetricBar({
@@ -79,25 +68,7 @@ function MetricBar({
 }
 
 /** Formatea una duración en mm:ss. */
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-/** Descarga el resumen como archivo JSON. */
-function exportJson(summary: SessionSummary) {
-  const blob = new Blob([JSON.stringify(summary, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `voxlfa-sesion-${new Date().toISOString().slice(0, 19)}.json`;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
+// helper formatDuration kept in SessionSummaryFooter if needed
 
 export function SuggestionPanel({
   analysis,
@@ -105,13 +76,63 @@ export function SuggestionPanel({
   sessionSummary,
   onApplySuggestion,
   onRefreshSummary,
+  aiSuggestions,
+  aiLoading,
+  aiError,
+  onRequestAi,
 }: SuggestionPanelProps) {
   const metrics = analysis?.metrics;
+
+  // dismissed suggestions persisted in sessionStorage; keep local state to avoid mutating `analysis`
+  const dismissedKey = "voxlfa:dismissedSuggestions";
+  const [dismissed, setDismissed] = useState<number[]>(() => {
+    try {
+      const raw = sessionStorage.getItem(dismissedKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(dismissedKey, JSON.stringify(dismissed));
+    } catch {}
+  }, [dismissed]);
+
+  // collapsed state for metrics (compact by default)
+  const [metricsCollapsed, setMetricsCollapsed] = useState<boolean>(true);
+  const toggleMetrics = () => setMetricsCollapsed((v) => !v);
+
+  // map raw Suggestion -> UiSuggestion with enforced structure
+  function mapToUi(s: RawSuggestion): UiSuggestion {
+    const sev: UiSuggestion["severity"] = s.severity >= 0.75 ? "critical" : s.severity >= 0.4 ? "recommended" : "optional";
+    // best-effort extraction for numeric detected value
+    const numMatch = String(s.message).match(/([0-9]+(?:\.[0-9]+)?)(?:\s*)(ms|s|db|dB|%|:1)?/i);
+    const detected = {
+      label: s.kind === "dynamics" ? "Compresión" : s.kind === "fatigue" ? "Fatiga" : s.kind === "resonance" ? "Resonancia" : s.kind === "timbre" ? "Brillo" : "Medida",
+      value: numMatch ? Number(numMatch[1]) : undefined,
+      unit: numMatch && numMatch[2] ? numMatch[2] : undefined,
+    };
+    // try to split message into consequence + recommendation if structured
+    const consequence = s.message || "";
+    const recommendationLabel = s.action && s.action.type === "applyPreset" ? `Aplicar preset ${s.action.payload?.presetId ?? ""}` : s.suggestion ?? s.message ?? "Aplicar ajuste recomendado";
+    return {
+      id: s.id,
+      kind: s.kind,
+      detected,
+      consequence,
+      recommendation: { label: recommendationLabel, payload: s.action?.payload ?? null },
+      severity: sev,
+      action: s.action ?? null,
+    };
+  }
+
+  const dismiss = (id: number) => setDismissed((prev) => Array.from(new Set([...prev, id])));
 
   return (
     <div className="ai">
       {/* Métricas de voz en vivo */}
-      <div className="ai__metrics">
+      <div className={`ai__metrics ${metricsCollapsed ? "ai__metrics--collapsed" : ""}`}>
         {!metrics ? (
           <p className="ai-empty">
             {running
@@ -120,127 +141,97 @@ export function SuggestionPanel({
           </p>
         ) : (
           <>
-            <MetricBar
-              label="Brillo"
-              value={metrics.brightness}
-              color="var(--color-cyan)"
-            />
-            <MetricBar
-              label="Resonancia"
-              value={metrics.resonanceScore}
-              color="var(--color-cyan)"
-            />
-            <MetricBar
-              label="Fatiga"
-              value={metrics.fatigueScore}
-              color="var(--color-accent)"
-            />
-            <div className="ai-metric ai-metric--plain">
-              <div className="ai-metric__row">
-                <span className="ai-metric__label">Dinámica</span>
-                <span className="ai-metric__value">
-                  {metrics.dynamicRangeDb.toFixed(1)} dB
-                </span>
+            <div className="ai__metrics__header">
+              <button className="btn btn--ghost btn--small" onClick={toggleMetrics} aria-expanded={!metricsCollapsed}>
+                {metricsCollapsed ? "Mostrar estado" : "Ocultar estado"}
+              </button>
+            </div>
+            <div className="ai__metrics__body">
+              <MetricBar
+                label="Brillo"
+                value={metrics.brightness}
+                color="var(--color-cyan)"
+              />
+              <MetricBar
+                label="Resonancia"
+                value={metrics.resonanceScore}
+                color="var(--color-cyan)"
+              />
+              <MetricBar
+                label="Fatiga"
+                value={metrics.fatigueScore}
+                color="var(--color-accent)"
+              />
+              <div className="ai-metric ai-metric--plain">
+                <div className="ai-metric__row">
+                  <span className="ai-metric__label">Dinámica</span>
+                  <span className="ai-metric__value">
+                    {metrics.dynamicRangeDb.toFixed(1)} dB
+                  </span>
+                </div>
               </div>
             </div>
           </>
         )}
       </div>
-
-      {/* Sugerencias accionables */}
-      <h3 className="ai__subtitle">Sugerencias</h3>
-      {!metrics ? (
+      {/* Sugerencias activas (heurísticas + IA) */}
+      <h3 className="ai__subtitle">Sugerencias activas</h3>
+      {!(analysis?.suggestions || aiSuggestions)?.length ? (
         <p className="ai-empty">Aún no hay sugerencias.</p>
-      ) : analysis.suggestions.length === 0 ? (
-        <p className="ai-empty">Voz equilibrada: sin sugerencias por ahora.</p>
       ) : (
-        <div className="ai__list">
-          {analysis.suggestions.map((suggestion) => (
-            <div
-              key={suggestion.id}
-              className="ai-suggestion"
-              style={{
-                borderLeftColor: KIND_COLORS[suggestion.kind],
-              }}
-            >
-              <span
-                className="ai-suggestion__icon"
-                style={{ color: KIND_COLORS[suggestion.kind] }}
-              >
-                {KIND_ICONS[suggestion.kind]}
-              </span>
-              <div className="ai-suggestion__body">
-                <div className="ai-suggestion__head">
-                  <span className="ai-suggestion__kind">
-                    {KIND_LABELS[suggestion.kind]}
-                  </span>
-                  <span className="ai-suggestion__sev">
-                    {Math.round(suggestion.severity * 100)}%
-                  </span>
-                </div>
-                <p className="ai-suggestion__message">{suggestion.message}</p>
-                {suggestion.action.type === "applyPreset" && (
-                  <button
-                    type="button"
-                    className="btn btn--apply"
-                    disabled={!running}
-                    onClick={() => onApplySuggestion(suggestion.id)}
-                  >
-                    Aplicar {PRESET_NAMES[suggestion.action.preset]}
-                  </button>
-                )}
-              </div>
+        (() => {
+          const raw: RawSuggestion[] = [
+            ...(analysis?.suggestions ?? []),
+            ...(aiSuggestions ?? []),
+          ];
+          const uiSugs: UiSuggestion[] = raw.map(mapToUi).filter((s) => !dismissed.includes(s.id));
+          if (uiSugs.length === 0) return <p className="ai-empty">Voz equilibrada: sin sugerencias por ahora.</p>;
+          // order by severity: critical, recommended, optional
+          const rank = (sev: UiSuggestion["severity"]) => (sev === "critical" ? 0 : sev === "recommended" ? 1 : 2);
+          uiSugs.sort((a, b) => rank(a.severity) - rank(b.severity) || ((b.detected.value ?? 0) - (a.detected.value ?? 0)));
+          return (
+            <div className="ai__list">
+              <SuggestionList
+                suggestions={uiSugs}
+                onApply={(id) => onApplySuggestion(id)}
+                onDismiss={(id) => dismiss(id)}
+              />
             </div>
-          ))}
-        </div>
+          );
+        })()
       )}
 
-      {/* Resumen de sesión */}
-      <h3 className="ai__subtitle">Resumen de sesión</h3>
-      <div className="ai-session">
+      {/* Asesor IA (Groq) */}
+      <h3 className="ai__subtitle">Asesor de IA</h3>
+      <div className="ai-llm">
         <button
           type="button"
           className="btn btn--ghost btn--small"
-          onClick={onRefreshSummary}
+          disabled={!running || aiLoading}
+          onClick={onRequestAi}
         >
-          Actualizar resumen
+          {aiLoading ? "Consultando IA…" : "Pedir consejo a la IA"}
         </button>
-        {!sessionSummary ? (
-          <p className="ai-empty">
-            {running
-              ? "Acumulando la sesión…"
-              : "Sin sesión registrada todavía."}
-          </p>
-        ) : (
-          <>
-            <div className="ai-session__grid">
-              <span>Duración</span>
-              <strong>{formatDuration(sessionSummary.durationMs)}</strong>
-              <span>RMS medio</span>
-              <strong>{formatDb(sessionSummary.avgRmsDb)} dBFS</strong>
-              <span>Pico</span>
-              <strong>{formatDb(sessionSummary.peakDb)} dBFS</strong>
-              <span>Dinámica</span>
-              <strong>{sessionSummary.dynamicRangeDb.toFixed(1)} dB</strong>
-              <span>Brillo</span>
-              <strong>{Math.round(sessionSummary.avgBrightness * 100)}%</strong>
-              <span>Fatiga</span>
-              <strong>{Math.round(sessionSummary.fatigueScore * 100)}%</strong>
-              <span>Voz alta</span>
-              <strong>{formatDuration(sessionSummary.loudTimeMs)}</strong>
-              <span>Sugerencias</span>
-              <strong>{sessionSummary.suggestionsCount}</strong>
-            </div>
-            <button
-              type="button"
-              className="btn btn--export"
-              onClick={() => exportJson(sessionSummary)}
-            >
-              Exportar JSON
-            </button>
-          </>
+        {aiError && <p className="ai-llm__error">{aiError}</p>}
+        {(aiSuggestions ?? []).length > 0 && (
+          <div className="ai__list">
+            <SuggestionList
+              suggestions={(aiSuggestions ?? []).map(mapToUi)}
+              onApply={(id) => onApplySuggestion(id)}
+              onDismiss={(id) => dismiss(id)}
+            />
+          </div>
         )}
       </div>
+
+      {/* Footer: session summary + IA request */}
+      {/* Rendered by SessionSummaryFooter component */}
+      <SessionSummaryFooter
+        summary={sessionSummary}
+        onRefresh={onRefreshSummary}
+        onRequestAi={onRequestAi}
+        aiLoading={aiLoading}
+      />
     </div>
   );
 }

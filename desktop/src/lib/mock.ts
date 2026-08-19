@@ -9,6 +9,7 @@ import { SPECTRUM_BIN_COUNT } from "./types";
 import type {
   AnalysisSample,
   AppConfig,
+  DenoiseParams,
   DeviceList,
   DspLinkState,
   DspState,
@@ -16,8 +17,12 @@ import type {
   EngineState,
   EngineStatus,
   EqBand,
+  FeedbackSuppressorParams,
+  HostList,
   LevelSample,
+  ModelStatus,
   NoiseGateParams,
+  PitchCorrectionParams,
   PresetId,
   PresetInfo,
   SessionSummary,
@@ -48,6 +53,16 @@ const FAKE_DEVICES: DeviceList = {
   ],
 };
 
+/** Hosts de audio simulados. */
+const FAKE_HOSTS: HostList = {
+  hosts: [
+    { id: "alsa", name: "ALSA", isDefault: true },
+    { id: "jack", name: "JACK", isDefault: false },
+    { id: "pipewire", name: "PipeWire", isDefault: false },
+  ],
+  defaultId: "alsa",
+};
+
 /** Presets simulados (espejo de `PresetFactory::all()` en el core). */
 const FAKE_PRESETS: PresetInfo[] = [
   {
@@ -75,9 +90,9 @@ const FAKE_PRESETS: PresetInfo[] = [
 /** Nombres de módulo por preset (espejo de `PresetFactory::specs`). */
 const PRESET_LINKS: Record<PresetId, string[]> = {
   dry: [],
-  vozLimpia: ["highpass", "noisegate", "boomsuppressor", "eq", "deesser", "compressor", "limiter"],
-  radio: ["highpass", "noisegate", "notch", "eq", "saturator", "compressor", "limiter"],
-  warm: ["highpass", "noisegate", "boomsuppressor", "eq", "compressor", "reverb", "limiter"],
+  vozLimpia: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "deesser", "compressor", "limiter"],
+  radio: ["highpass", "denoise", "noisegate", "notch", "eq", "saturator", "compressor", "limiter"],
+  warm: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "compressor", "reverb", "limiter"],
 };
 
 /** Parámetros de la puerta de ruido por preset (espejo del core). */
@@ -109,10 +124,12 @@ const PRESET_EQ: Record<PresetId, EqBand[]> = {
 
 /** Configuración simulada (vacía: sin perfiles ni valores recordados). */
 const FAKE_CONFIG: AppConfig = {
+  defaultHost: null,
   defaultInput: null,
   defaultOutput: null,
   bufferSize: null,
   profiles: [],
+  telemetryEnabled: null,
 };
 
 /** Cada cuánto se emite una muestra de nivel (ms), igual que el core. */
@@ -191,6 +208,22 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+/** Parámetros de denoise por preset (espejo del core). */
+const PRESET_DENOISE: Record<PresetId, DenoiseParams | null> = {
+  dry: null,
+  vozLimpia: { mix: 1.0 },
+  radio: { mix: 1.0 },
+  warm: { mix: 1.0 },
+};
+
+/** Parámetros de feedback suppressor por preset. */
+const PRESET_FEEDBACK: Record<PresetId, FeedbackSuppressorParams | null> = {
+  dry: null,
+  vozLimpia: { thresholdDb: -30.0, q: 10.0 },
+  radio: { thresholdDb: -30.0, q: 10.0 },
+  warm: { thresholdDb: -30.0, q: 10.0 },
+};
+
 function buildDspState(preset: PresetId): DspState {
   const links: DspLinkState[] = PRESET_LINKS[preset].map((name) => ({
     name,
@@ -198,6 +231,9 @@ function buildDspState(preset: PresetId): DspState {
     bypass: false,
     eqBands: name === "eq" ? PRESET_EQ[preset] : null,
     gateParams: name === "noisegate" ? PRESET_GATE[preset] : null,
+    denoiseParams: name === "denoise" ? PRESET_DENOISE[preset] : null,
+    feedbackParams: name === "feedback" ? PRESET_FEEDBACK[preset] : null,
+    pitchCorrectionParams: null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -235,6 +271,7 @@ function buildStatus(): EngineStatus {
     sampleRate,
     bufferSize,
     latencyMs: lastLevel?.latencyMs ?? 8,
+    audioHost: state === "stopped" ? null : "alsa",
     inputDevice: state === "stopped" ? null : FAKE_DEVICES.inputs[0].name,
     outputDevice: state === "stopped" ? null : FAKE_DEVICES.outputs[0].name,
   };
@@ -484,6 +521,10 @@ export function listDevices(): Promise<DeviceList> {
   return Promise.resolve(FAKE_DEVICES);
 }
 
+export function listAudioHosts(): Promise<HostList> {
+  return Promise.resolve(FAKE_HOSTS);
+}
+
 export function startEngine(requested?: number | null): Promise<void> {
   return new Promise((resolve) => {
     state = "starting";
@@ -593,6 +634,43 @@ export function setNoiseGate(params: NoiseGateParams): Promise<void> {
   return Promise.resolve();
 }
 
+export function setDenoise(params: DenoiseParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "denoise" ? { ...item, denoiseParams: params } : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setFeedback(params: FeedbackSuppressorParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "feedback"
+        ? { ...item, feedbackParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setPitchCorrection(params: PitchCorrectionParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "pitch_correction"
+        ? { ...item, pitchCorrectionParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
 export function getAnalysis(): Promise<AnalysisSample | null> {
   return Promise.resolve(hasRun ? lastAnalysis : null);
 }
@@ -611,8 +689,41 @@ export function applySuggestion(suggestionId: number): Promise<void> {
   return Promise.resolve();
 }
 
+export function requestAiSuggestions(): Promise<Suggestion[]> {
+  return Promise.resolve([]);
+}
+
+export function getAiSuggestions(): Promise<Suggestion[]> {
+  return Promise.resolve([]);
+}
+
 export function getPairingInfo(): Promise<PairingInfo> {
   return Promise.resolve(FAKE_PAIRING);
+}
+
+export function getTelemetryConsent(): Promise<boolean | null> {
+  return Promise.resolve(FAKE_CONFIG.telemetryEnabled);
+}
+
+export function setTelemetryConsent(enabled: boolean): Promise<void> {
+  FAKE_CONFIG.telemetryEnabled = enabled;
+  return Promise.resolve();
+}
+
+export function getModelStatus(): Promise<ModelStatus> {
+  return Promise.resolve({
+    available: false,
+    modelDir: "/tmp/voxlfa/models",
+    missing: ["enc.onnx", "erb_dec.onnx", "df_dec.onnx", "config.ini"],
+  });
+}
+
+export function downloadModels(): Promise<ModelStatus> {
+  return Promise.resolve({
+    available: true,
+    modelDir: "/tmp/voxlfa/models",
+    missing: [],
+  });
 }
 
 type PairingListener = (code: string) => void;
