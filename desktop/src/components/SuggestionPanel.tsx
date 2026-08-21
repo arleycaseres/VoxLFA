@@ -8,7 +8,7 @@ import type {
   Suggestion as RawSuggestion,
 } from "../lib/types";
 import type { UiSuggestion } from "../lib/uiTypes";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 // formatDb no se usa en este panel; se mantiene en otros componentes si es necesario
 import SuggestionList from "./SuggestionList";
 import SessionSummaryFooter from "./SessionSummaryFooter";
@@ -32,6 +32,10 @@ interface SuggestionPanelProps {
   aiError: string;
   /** Solicita sugerencias al asesor de IA. */
   onRequestAi: () => void;
+  /** IDs de sugerencias descartadas (compartido con FloatingSuggestion). */
+  dismissed: number[];
+  /** Marca una sugerencia como descartada. */
+  onDismiss: (id: number) => void;
 }
 
 /** Nombre legible de cada área de la voz (en español). */
@@ -80,24 +84,10 @@ export function SuggestionPanel({
   aiLoading,
   aiError,
   onRequestAi,
+  dismissed,
+  onDismiss,
 }: SuggestionPanelProps) {
   const metrics = analysis?.metrics;
-
-  // dismissed suggestions persisted in sessionStorage; keep local state to avoid mutating `analysis`
-  const dismissedKey = "voxlfa:dismissedSuggestions";
-  const [dismissed, setDismissed] = useState<number[]>(() => {
-    try {
-      const raw = sessionStorage.getItem(dismissedKey);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(dismissedKey, JSON.stringify(dismissed));
-    } catch {}
-  }, [dismissed]);
 
   // collapsed state for metrics (compact by default)
   const [metricsCollapsed, setMetricsCollapsed] = useState<boolean>(true);
@@ -115,19 +105,17 @@ export function SuggestionPanel({
     };
     // try to split message into consequence + recommendation if structured
     const consequence = s.message || "";
-    const recommendationLabel = s.action && s.action.type === "applyPreset" ? `Aplicar preset ${s.action.payload?.presetId ?? ""}` : s.suggestion ?? s.message ?? "Aplicar ajuste recomendado";
+    const recommendationLabel = s.action && s.action.type === "applyPreset" ? `Aplicar preset ${s.action.preset ?? ""}` : s.message ?? "Aplicar ajuste recomendado";
     return {
       id: s.id,
       kind: s.kind,
       detected,
       consequence,
-      recommendation: { label: recommendationLabel, payload: s.action?.payload ?? null },
+      recommendation: { label: recommendationLabel, payload: s.action?.type === "applyPreset" ? s.action.preset : null },
       severity: sev,
       action: s.action ?? null,
     };
   }
-
-  const dismiss = (id: number) => setDismissed((prev) => Array.from(new Set([...prev, id])));
 
   return (
     <div className="ai">
@@ -194,7 +182,7 @@ export function SuggestionPanel({
               <SuggestionList
                 suggestions={uiSugs}
                 onApply={(id) => onApplySuggestion(id)}
-                onDismiss={(id) => dismiss(id)}
+                onDismiss={(id) => onDismiss(id)}
               />
             </div>
           );
@@ -218,7 +206,7 @@ export function SuggestionPanel({
             <SuggestionList
               suggestions={(aiSuggestions ?? []).map(mapToUi)}
               onApply={(id) => onApplySuggestion(id)}
-              onDismiss={(id) => dismiss(id)}
+              onDismiss={(id) => onDismiss(id)}
             />
           </div>
         )}

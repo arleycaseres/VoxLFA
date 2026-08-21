@@ -33,6 +33,7 @@ use std::f32::consts::PI;
 use std::path::PathBuf;
 
 use ort::session::Session;
+use ort::value::Tensor;
 
 use super::processor::{AudioProcessor, ProcessResult, ProcessingInfo};
 
@@ -44,9 +45,6 @@ const DEFAULT_NB_ERB: usize = 32;
 const DEFAULT_NB_DF: usize = 96;
 const DEFAULT_DF_ORDER: usize = 10;
 const DEFAULT_CONV_CH: usize = 64;
-const DEFAULT_CONV_LOOKAHEAD: usize = 2;
-const DEFAULT_DF_LOOKAHEAD: usize = 2;
-const DEFAULT_EMB_HIDDEN_DIM: usize = 256;
 
 // ── Config INI ──
 
@@ -98,10 +96,7 @@ fn erb_from_hz(hz: f32) -> f32 {
     21.4 * (4.7 * hz / 1000.0 + 1.0).ln() * 4.0 / std::f32::consts::LN_10
 }
 
-fn hz_from_erb(erb: f32) -> f32 {
-    (10f32.powf(erb * std::f32::consts::LN_10 / 4.0) - 1.0) * 1000.0 / 4.7
-}
-
+#[allow(clippy::needless_range_loop)]
 fn build_erb_filterbank(n_freqs: usize, fft_size: usize, sr: u32, nb_erb: usize) -> Vec<Vec<f32>> {
     let sr_f = sr as f32;
     let erb_min = erb_from_hz(0.0);
@@ -173,6 +168,9 @@ fn fft_in_place(buf: &mut [(f32, f32)], n: usize, inverse: bool) {
 
 // ── Estado de inferencia ──
 
+/// Procesador de audio que aplica denoise con DeepFilterNet3 (ONNX).
+///
+/// Si los modelos ONNX no están disponibles, funciona como passthrough.
 pub struct OnnxDenoise {
     enabled: bool,
     fft_size: usize,
@@ -200,12 +198,16 @@ pub struct OnnxDenoise {
     feat_spec: Vec<f32>,
     spec_out: Vec<f32>,
     spec_out_buf: Vec<f32>,
+    ifft_buf: Vec<(f32, f32)>,
+    mask_erb_buf: Vec<f32>,
+    df_coefs_buf: Vec<f32>,
 
     erb_norm_state: Vec<f32>,
     norm_alpha: f32,
 }
 
 impl OnnxDenoise {
+    /// Crea un nuevo denoiser cargando los modelos ONNX del directorio dado.
     pub fn new(model_dir: PathBuf) -> Result<Self, crate::Error> {
         let cfg = {
             let path = model_dir.join("config.ini");
@@ -262,6 +264,9 @@ impl OnnxDenoise {
             feat_spec: vec![0.0; 2 * nb_df],
             spec_out: vec![0.0; 2 * n_freqs],
             spec_out_buf: vec![0.0; n_freqs * 2],
+            ifft_buf: vec![(0.0, 0.0); fft_size],
+            mask_erb_buf: vec![0.0; nb_erb],
+            df_coefs_buf: vec![0.0; nb_df * df_order * 2],
             erb_norm_state: vec![0.0; nb_erb],
             norm_alpha,
         })
@@ -333,7 +338,6 @@ impl OnnxDenoise {
     fn apply_df(&mut self, coefs: &[f32]) {
         let nb_df = self.nb_df;
         let df_order = self.df_order;
-        let n_freqs = self.n_freqs;
         for f in 0..nb_df {
             let mut out_re = self.spec_out_buf[2 * f];
             let mut out_im = self.spec_out_buf[2 * f + 1];
@@ -351,31 +355,32 @@ impl OnnxDenoise {
         }
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn compute_istft(&mut self, output: &mut [f32]) {
         let frames = output.len().min(self.hop_size);
 
         // Copiar spec_out_buf al buffer ifft (simétrico para IFFT real).
-        let mut ifft_buf = vec![(0.0f32, 0.0f32); self.fft_size];
+        self.ifft_buf.fill((0.0, 0.0));
         for i in 0..self.n_freqs {
-            ifft_buf[i] = (self.spec_out_buf[2 * i], self.spec_out_buf[2 * i + 1]);
+            self.ifft_buf[i] = (self.spec_out_buf[2 * i], self.spec_out_buf[2 * i + 1]);
         }
         for i in 1..self.fft_size - self.n_freqs + 1 {
             let mirror = self.fft_size - i;
             if mirror < self.n_freqs {
-                ifft_buf[i] = (self.spec_out_buf[2 * i], -self.spec_out_buf[2 * i + 1]);
+                self.ifft_buf[i] = (self.spec_out_buf[2 * i], -self.spec_out_buf[2 * i + 1]);
             }
         }
 
-        fft_in_place(&mut ifft_buf, self.fft_size, true);
+        fft_in_place(&mut self.ifft_buf, self.fft_size, true);
 
         for i in 0..frames {
             let idx = (self.ring_pos + i) % self.fft_size;
-            output[i] = ifft_buf[idx].0 + self.output_overlap[i];
+            output[i] = self.ifft_buf[idx].0 + self.output_overlap[i];
         }
 
         for i in 0..self.fft_size - self.hop_size {
             self.output_overlap[i] =
-                ifft_buf[(self.ring_pos + self.hop_size + i) % self.fft_size].0;
+                self.ifft_buf[(self.ring_pos + self.hop_size + i) % self.fft_size].0;
         }
         for i in (self.fft_size - self.hop_size)..self.fft_size {
             self.output_overlap[i] = 0.0;
@@ -434,8 +439,8 @@ impl AudioProcessor for OnnxDenoise {
             self.compute_spec_features();
 
             // 5) Inferencia ONNX.
-            let mut mask_erb = vec![0.0f32; self.nb_erb];
-            let mut df_coefs = vec![0.0f32; self.nb_df * self.df_order * 2];
+            self.mask_erb_buf.fill(0.0);
+            self.df_coefs_buf.fill(0.0);
 
             if let (Some(enc), Some(erb_dec), Some(df_dec)) = (
                 self.session_enc.as_mut(),
@@ -451,8 +456,8 @@ impl AudioProcessor for OnnxDenoise {
                     self.nb_erb,
                     self.nb_df,
                     self.conv_ch,
-                    &mut mask_erb,
-                    &mut df_coefs,
+                    &mut self.mask_erb_buf,
+                    &mut self.df_coefs_buf,
                 ) {
                     log::warn!("ONNX inference failed, passthrough: {e}");
                     output_chunk.copy_from_slice(input_chunk);
@@ -462,14 +467,18 @@ impl AudioProcessor for OnnxDenoise {
             }
 
             // 6) Aplicar máscara ERB al espectro.
+            let mask_erb = std::mem::take(&mut self.mask_erb_buf);
             self.apply_mask(&mask_erb);
+            self.mask_erb_buf = mask_erb;
 
             // 7) Aplicar DF coefficients.
+            let df_coefs = std::mem::take(&mut self.df_coefs_buf);
             if df_coefs.iter().any(|&x| x != 0.0) {
                 self.apply_df(&df_coefs);
             } else {
                 self.spec_out_buf.copy_from_slice(&self.spec_out);
             }
+            self.df_coefs_buf = df_coefs;
 
             // 8) ISTFT + overlap-add.
             self.compute_istft(output_chunk);
@@ -491,11 +500,13 @@ impl AudioProcessor for OnnxDenoise {
         self.input_ring.fill(0.0);
         self.output_overlap.fill(0.0);
         self.erb_norm_state.fill(0.0);
+        self.ifft_buf.fill((0.0, 0.0));
     }
 }
 
 // ── Inferencia ONNX ──
 
+#[allow(clippy::too_many_arguments)]
 fn run_inference(
     enc: &mut Session,
     erb_dec: &mut Session,
@@ -504,7 +515,7 @@ fn run_inference(
     feat_spec: &[f32],
     nb_erb: usize,
     nb_df: usize,
-    conv_ch: usize,
+    _conv_ch: usize,
     mask_erb: &mut [f32],
     df_coefs: &mut [f32],
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -523,49 +534,30 @@ fn run_inference(
     let enc_outputs = enc.run(ort::inputs![
         "feat_erb" => erb_tensor,
         "feat_spec" => spec_tensor,
-    ]?)?;
+    ])?;
 
-    // Extraer outputs del encoder: e0, e1, e2, e3, emb, c0, lsnr
-    // Necesitamos: emb, c0, e0..e3
-    let emb_value = enc_outputs["emb"].try_extract_tensor::<f32>()?;
-    let c0_value = enc_outputs["c0"].try_extract_tensor::<f32>()?;
-    let e0_value = enc_outputs["e0"].try_extract_tensor::<f32>()?;
-    let e1_value = enc_outputs["e1"].try_extract_tensor::<f32>()?;
-    let e2_value = enc_outputs["e2"].try_extract_tensor::<f32>()?;
-    let e3_value = enc_outputs["e3"].try_extract_tensor::<f32>()?;
-
-    let emb_arr = emb_value.to_owned().into_dimensionality::<ndarray::Ix3>()?;
-    let c0_arr = c0_value.to_owned().into_dimensionality::<ndarray::Ix4>()?;
-    let e0_arr = e0_value.to_owned().into_dimensionality::<ndarray::Ix4>()?;
-    let e1_arr = e1_value.to_owned().into_dimensionality::<ndarray::Ix4>()?;
-    let e2_arr = e2_value.to_owned().into_dimensionality::<ndarray::Ix4>()?;
-    let e3_arr = e3_value.to_owned().into_dimensionality::<ndarray::Ix4>()?;
-
-    // ── ERB Decoder ──
+    // ── ERB Decoder (usa outputs del encoder directamente, sin clones) ──
     let erb_dec_outputs = erb_dec.run(ort::inputs![
-        "emb" => Tensor::from_array(emb_arr)?,
-        "e3" => Tensor::from_array(e3_arr)?,
-        "e2" => Tensor::from_array(e2_arr)?,
-        "e1" => Tensor::from_array(e1_arr)?,
-        "e0" => Tensor::from_array(e0_arr)?,
-    ]?)?;
+        "emb" => &enc_outputs["emb"],
+        "e3" => &enc_outputs["e3"],
+        "e2" => &enc_outputs["e2"],
+        "e1" => &enc_outputs["e1"],
+        "e0" => &enc_outputs["e0"],
+    ])?;
 
-    let mask_value = erb_dec_outputs["m"].try_extract_tensor::<f32>()?;
-    let mask_arr = mask_value
-        .to_owned()
-        .into_dimensionality::<ndarray::Ix4>()?;
+    let mask_arr = erb_dec_outputs["m"].try_extract_array::<f32>()?;
     let mask_data = mask_arr.as_slice().unwrap_or_default();
     let mask_len = mask_data.len().min(mask_erb.len());
     mask_erb[..mask_len].copy_from_slice(&mask_data[..mask_len]);
 
-    // ── DF Decoder ──
+    // ── DF Decoder (usa outputs del encoder directamente) ──
     let df_dec_outputs = df_dec.run(ort::inputs![
-        "emb" => Tensor::from_array(emb_arr)?,
-        "c0" => Tensor::from_array(c0_arr)?,
-    ]?)?;
+        "emb" => &enc_outputs["emb"],
+        "c0" => &enc_outputs["c0"],
+    ])?;
 
-    let coefs_value = df_dec_outputs["coefs"].try_extract_tensor::<f32>()?;
-    let coefs_data = coefs_value.as_slice().unwrap_or_default();
+    let coefs_arr = df_dec_outputs["coefs"].try_extract_array::<f32>()?;
+    let coefs_data = coefs_arr.as_slice().unwrap_or_default();
     let coefs_len = coefs_data.len().min(df_coefs.len());
     df_coefs[..coefs_len].copy_from_slice(&coefs_data[..coefs_len]);
 
@@ -577,9 +569,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn onnx_denoise_creation_without_models_returns_error() {
+    fn onnx_denoise_creation_without_models_is_passthrough() {
         let result = OnnxDenoise::new(std::path::PathBuf::from("/nonexistent"));
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert!(!result.unwrap().enabled);
     }
 
     #[test]

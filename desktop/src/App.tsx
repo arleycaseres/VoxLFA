@@ -5,6 +5,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useEngine } from "./hooks/useEngine";
+import type { UiSuggestion } from "./lib/uiTypes";
+import type { Suggestion as RawSuggestion } from "./lib/types";
 import { Dial } from "./components/Dial";
 import { Meter } from "./components/Meter";
 import { DeviceSelector } from "./components/DeviceSelector";
@@ -15,8 +17,13 @@ import { PresetCard } from "./components/PresetCard";
 import { DspChain } from "./components/DspChain";
 import { EqPanel } from "./components/EqPanel";
 import { GatePanel } from "./components/GatePanel";
+import { DenoisePanel } from "./components/DenoisePanel";
+import { FeedbackPanel } from "./components/FeedbackPanel";
+import { PitchCorrectionPanel } from "./components/PitchCorrectionPanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
+import { FloatingSuggestion } from "./components/FloatingSuggestion";
 import { SpectrumView } from "./components/SpectrumView";
+import { SetupGuide } from "./components/SetupGuide";
 import { formatLatency, formatSampleRate } from "./lib/format";
 import "./styles/fonts.css";
 import "./styles/tokens.css";
@@ -33,6 +40,62 @@ export default function App() {
   const [outputName, setOutputName] = useState<string | null>(null);
   const [bufferSize, setBufferSize] = useState<number | null>(null);
   const prefilled = useRef(false);
+
+  // Estado compartido de sugerencias descartadas (persistido en sessionStorage).
+  const dismissedKey = "voxlfa:dismissedSuggestions";
+  const [dismissed, setDismissed] = useState<number[]>(() => {
+    try {
+      const raw = sessionStorage.getItem(dismissedKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(dismissedKey, JSON.stringify(dismissed));
+    } catch {}
+  }, [dismissed]);
+  const dismissSuggestion = (id: number) =>
+    setDismissed((prev) => Array.from(new Set([...prev, id])));
+
+  // Mapea una sugerencia raw a UiSuggestion para FloatingSuggestion.
+  function mapToUi(s: RawSuggestion): UiSuggestion {
+    const sev: UiSuggestion["severity"] =
+      s.severity >= 0.75 ? "critical" : s.severity >= 0.4 ? "recommended" : "optional";
+    return {
+      id: s.id,
+      kind: s.kind,
+      detected: { label: s.kind },
+      consequence: s.message,
+      recommendation: { label: s.message },
+      severity: sev,
+      action: s.action ?? null,
+    };
+  }
+
+  // Estado de visibilidad de sugerencias flotantes.
+  const [showFloating, setShowFloating] = useState(() => {
+    return localStorage.getItem("voxlfa:floatingVisible") !== "0";
+  });
+  const toggleFloating = () => {
+    const next = !showFloating;
+    setShowFloating(next);
+    localStorage.setItem("voxlfa:floatingVisible", next ? "1" : "0");
+  };
+
+  // Sugerencias activas (heurísticas + IA) sin descartadas, para FloatingSuggestion.
+  const activeSuggestions: UiSuggestion[] = [
+    ...(engine.analysis?.suggestions ?? []),
+    ...(engine.aiSuggestions ?? []),
+  ]
+    .map(mapToUi)
+    .filter((s) => !dismissed.includes(s.id));
+
+  // Muestra la guía de configuración solo en el primer arranque.
+  const [showGuide, setShowGuide] = useState(() => {
+    return localStorage.getItem("voxlfa:guideSeen") !== "1";
+  });
 
   // Precarga los selectores con la última selección persistida (si el
   // dispositivo sigue conectado). Solo la primera vez que hay config y lista.
@@ -68,10 +131,10 @@ export default function App() {
   const [rightCollapsed, setRightCollapsed] = useState<boolean>(
     localStorage.getItem("voxlfa:rightCollapsed") === "1"
   );
-  const [leftWidth, setLeftWidth] = useState<number>(() =>
+  const [leftWidth, _setLeftWidth] = useState<number>(() =>
     parseInt(localStorage.getItem("voxlfa:leftCol") ?? "300", 10)
   );
-  const [rightWidth, setRightWidth] = useState<number>(() =>
+  const [rightWidth, _setRightWidth] = useState<number>(() =>
     parseInt(localStorage.getItem("voxlfa:rightCol") ?? "320", 10)
   );
 
@@ -85,6 +148,11 @@ export default function App() {
     const next = !rightCollapsed;
     setRightCollapsed(next);
     localStorage.setItem("voxlfa:rightCollapsed", next ? "1" : "0");
+  };
+
+  const closeGuide = () => {
+    setShowGuide(false);
+    localStorage.setItem("voxlfa:guideSeen", "1");
   };
 
   return (
@@ -104,6 +172,13 @@ export default function App() {
         <div className="app__header-right">
           <StatusPill state={engine.status?.state ?? null} />
           <PairingBadge pairing={engine.pairing} />
+          <button
+            className="help-trigger"
+            onClick={() => setShowGuide(true)}
+            aria-label="Abrir guía de configuración"
+          >
+            ?
+          </button>
         </div>
       </header>
 
@@ -132,6 +207,25 @@ export default function App() {
               {leftCollapsed ? "›" : "‹"}
             </button>
           </h2>
+
+          {/* Toggle de sugerencias flotantes */}
+          {activeSuggestions.length > 0 && (
+            <button
+              type="button"
+              className={`btn btn--ghost btn--small floating-toggle ${showFloating ? "floating-toggle--active" : ""}`}
+              onClick={toggleFloating}
+            >
+              💡 Sugerencias ({activeSuggestions.length})
+            </button>
+          )}
+
+          {showFloating && (
+            <FloatingSuggestion
+              suggestions={activeSuggestions}
+              onApply={(id) => void engine.applySuggestion(id)}
+              onDismiss={dismissSuggestion}
+            />
+          )}
 
           <DeviceSelector
             label="Entrada"
@@ -195,6 +289,27 @@ export default function App() {
             dsp={engine.dsp}
             running={running}
             onSetNoiseGate={(params) => void engine.setNoiseGate(params)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Supresión de ruido</h2>
+          <DenoisePanel
+            dsp={engine.dsp}
+            running={running}
+            onSetDenoise={(params) => void engine.setDenoise(params)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Antifeedback</h2>
+          <FeedbackPanel
+            dsp={engine.dsp}
+            running={running}
+            onSetFeedback={(params) => void engine.setFeedback(params)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Corrección tono</h2>
+          <PitchCorrectionPanel
+            dsp={engine.dsp}
+            running={running}
+            onSetPitchCorrection={(params) => void engine.setPitchCorrection(params)}
           />
 
           {engine.error && <p className="controls__error">{engine.error}</p>}
@@ -295,6 +410,12 @@ export default function App() {
             sessionSummary={engine.sessionSummary}
             onApplySuggestion={(id) => void engine.applySuggestion(id)}
             onRefreshSummary={() => void engine.refreshSessionSummary()}
+            aiSuggestions={engine.aiSuggestions}
+            aiLoading={engine.aiLoading}
+            aiError={engine.aiError}
+            onRequestAi={() => void engine.requestAi()}
+            dismissed={dismissed}
+            onDismiss={dismissSuggestion}
           />
         </aside>
       </main>
@@ -314,6 +435,9 @@ export default function App() {
           v0.4.0 · ajustes guardados por dispositivo
         </span>
       </footer>
+
+      {/* Guía de configuración (se muestra en el primer arranque) */}
+      {showGuide && <SetupGuide onClose={closeGuide} />}
     </div>
   );
 }

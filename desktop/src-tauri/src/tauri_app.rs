@@ -5,6 +5,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use log::info;
+use once_cell::sync::Lazy;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::broadcast;
@@ -33,9 +35,10 @@ const TELEMETRY_ENDPOINT: &str = "";
 
 /// Clave de la API de Groq para el asesor de IA.
 ///
-/// Se lee de la variable de entorno `GROQ_API_KEY`. Si está vacía o no
-/// existe, el asesor de IA no estará disponible (la UI muestra un mensaje).
-const GROQ_API_KEY: &str = option_env!("GROQ_API_KEY").unwrap_or("");
+/// Se lee de la variable de entorno `GROQ_API_KEY` en tiempo de ejecución.
+/// Si está vacía o no existe, el asesor de IA no estará disponible (la UI
+/// muestra un mensaje).
+static GROQ_API_KEY: Lazy<String> = Lazy::new(|| std::env::var("GROQ_API_KEY").unwrap_or_default());
 
 /// Capacidad del canal broadcast de eventos serializados.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -349,25 +352,28 @@ async fn request_ai_suggestions(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Vec<Suggestion>, String> {
-    // Obtener el análisis actual (requiere el motor corriendo).
-    let analysis = {
+    // Obtener el análisis actual y el estado DSP (requiere el motor corriendo).
+    let (analysis, dsp_state) = {
         let engine = state.engine.lock().map_err(|err| err.to_string())?;
         let handle = engine
             .analysis_handle()
             .ok_or_else(|| "el motor no está corriendo".to_string())?;
-        handle
+        let analysis = handle
             .get_analysis()
             .map_err(|err| err.to_string())?
-            .ok_or_else(|| "aún no hay análisis disponible".to_string())?
+            .ok_or_else(|| "aún no hay análisis disponible".to_string())?;
+        let dsp = engine.last_dsp_state();
+        (analysis, dsp)
     };
 
     let api_key = GROQ_API_KEY.to_string();
 
     // Ejecutar la petición LLM en un hilo bloqueante.
-    let result =
-        tokio::task::spawn_blocking(move || crate::llm::request_suggestions(&api_key, &analysis))
-            .await
-            .map_err(|e| format!("LLM task failed: {e}"))?;
+    let result = tokio::task::spawn_blocking(move || {
+        crate::llm::request_suggestions(&api_key, &analysis, dsp_state.as_ref())
+    })
+    .await
+    .map_err(|e| format!("LLM task failed: {e}"))?;
 
     if !result.error.is_empty() {
         return Err(result.error);
@@ -432,23 +438,31 @@ fn get_model_status() -> Result<voxlfa_core::models::ModelStatus, String> {
 /// modelos.
 #[tauri::command]
 async fn download_models(app: AppHandle) -> Result<voxlfa_core::models::ModelStatus, String> {
-    let version = env!("CARGO_PKG_VERSION");
-    let version_tag = format!("v{version}");
+    #[cfg(not(feature = "onnx"))]
+    {
+        return Err("Models feature (onnx) is disabled in this build".to_string());
+    }
 
-    let handle = app.clone();
-    let status = tokio::task::spawn_blocking(move || {
-        voxlfa_core::models::download_models(&version_tag, |step, total| {
-            let _ = handle.emit(
-                "model-download-progress",
-                serde_json::json!({ "step": step, "total": total }),
-            );
+    #[cfg(feature = "onnx")]
+    {
+        let version = env!("CARGO_PKG_VERSION");
+        let version_tag = format!("v{version}");
+
+        let handle = app.clone();
+        let status = tokio::task::spawn_blocking(move || {
+            voxlfa_core::models::download_models(&version_tag, |step, total| {
+                let _ = handle.emit(
+                    "model-download-progress",
+                    serde_json::json!({ "step": step, "total": total }),
+                );
+            })
         })
-    })
-    .await
-    .map_err(|e| format!("download task failed: {e}"))?
-    .map_err(|e| format!("download failed: {e}"))?;
+        .await
+        .map_err(|e| format!("download task failed: {e}"))?
+        .map_err(|e| format!("download failed: {e}"))?;
 
-    Ok(voxlfa_core::models::ModelStatus::check(&status))
+        return Ok(voxlfa_core::models::ModelStatus::check(&status));
+    }
 }
 
 /// Datos de emparejamiento para conectar la app móvil por WebSocket.
@@ -470,6 +484,9 @@ fn get_pairing_info(state: State<AppState>) -> Result<PairingInfo, String> {
 
 /// Arranca la aplicación Tauri completa (ventana + backend + WebSocket).
 pub fn run() {
+    // Cargar .env del directorio de trabajo antes de leer variables de entorno.
+    dotenvy::dotenv().ok();
+
     let builder = tauri::Builder::default()
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![

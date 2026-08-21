@@ -297,7 +297,8 @@ export type SuggestionAction =
   | { type: "setEqBand"; bandIndex: number; gainDb: number }
   | { type: "setDenoise"; mix: number }
   | { type: "setFeedback"; thresholdDb: number; q: number }
-  | { type: "setPitchCorrection"; strength: number; mix: number };
+  | { type: "setPitchCorrection"; strength: number; mix: number }
+  | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {

@@ -95,6 +95,16 @@ impl AnalysisHandle {
                     mix: *mix,
                 })
             }
+            SuggestionAction::SetNoiseGate {
+                threshold_db,
+                range_db,
+            } => self.dsp.set_noise_gate(crate::protocol::NoiseGateParams {
+                threshold_db: *threshold_db,
+                attack_ms: 2.0,
+                release_ms: 100.0,
+                hold_ms: 25.0,
+                range_db: *range_db,
+            }),
         }
     }
 }

@@ -10,7 +10,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::dsp::PresetId;
+use super::dsp::{
+    DenoiseParams, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams, PresetId,
+};
 
 /// Comando de control del motor, enviado por la UI (o el móvil) hacia el core.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,5 +57,25 @@ pub enum ControlCommand {
         band_index: usize,
         /// Ganancia en dB (se acota a `[-18, 18]` en la entrada de red).
         gain_db: f32,
+    },
+    /// Ajusta los parámetros de la puerta de ruido del preset activo (motor corriendo).
+    SetNoiseGate {
+        /// Nuevos parámetros de la puerta.
+        params: NoiseGateParams,
+    },
+    /// Ajusta la mezcla seco/húmedo del denoise del preset activo (motor corriendo).
+    SetDenoise {
+        /// Nuevos parámetros de denoise.
+        params: DenoiseParams,
+    },
+    /// Ajusta los parámetros del feedback suppressor del preset activo (motor corriendo).
+    SetFeedback {
+        /// Nuevos parámetros del supresor de feedback.
+        params: FeedbackSuppressorParams,
+    },
+    /// Ajusta los parámetros de corrección de tono del preset activo (motor corriendo).
+    SetPitchCorrection {
+        /// Nuevos parámetros de corrección de tono.
+        params: PitchCorrectionParams,
     },
 }

@@ -181,6 +181,66 @@ fn unknown_control_command_type_is_rejected() {
 }
 
 #[test]
+fn control_command_new_dsp_variants_round_trip() {
+    use voxlfa_core::protocol::{
+        DenoiseParams, FeedbackSuppressorParams, MusicalNote, MusicalScale, NoiseGateParams,
+        PitchCorrectionParams,
+    };
+
+    let commands = vec![
+        ControlCommand::SetNoiseGate {
+            params: NoiseGateParams {
+                threshold_db: -40.0,
+                attack_ms: 1.0,
+                release_ms: 100.0,
+                hold_ms: 200.0,
+                range_db: 30.0,
+            },
+        },
+        ControlCommand::SetDenoise {
+            params: DenoiseParams { mix: 0.75 },
+        },
+        ControlCommand::SetFeedback {
+            params: FeedbackSuppressorParams {
+                threshold_db: -30.0,
+                q: 10.0,
+            },
+        },
+        ControlCommand::SetPitchCorrection {
+            params: PitchCorrectionParams {
+                scale: MusicalScale::Major,
+                root: MusicalNote::A,
+                strength: 0.5,
+                mix: 0.8,
+            },
+        },
+    ];
+
+    for command in commands {
+        let json = serde_json::to_string(&command).unwrap();
+        let decoded: ControlCommand = serde_json::from_str(&json).unwrap();
+        match (&command, &decoded) {
+            (ControlCommand::SetNoiseGate { .. }, ControlCommand::SetNoiseGate { .. }) => {
+                assert!(json.contains("\"type\":\"setNoiseGate\""));
+            }
+            (ControlCommand::SetDenoise { .. }, ControlCommand::SetDenoise { .. }) => {
+                assert!(json.contains("\"type\":\"setDenoise\""));
+            }
+            (ControlCommand::SetFeedback { .. }, ControlCommand::SetFeedback { .. }) => {
+                assert!(json.contains("\"type\":\"setFeedback\""));
+            }
+            (
+                ControlCommand::SetPitchCorrection { .. },
+                ControlCommand::SetPitchCorrection { .. },
+            ) => {
+                assert!(json.contains("\"type\":\"setPitchCorrection\""));
+            }
+            other => panic!("el comando no preservó su variante: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn engine_event_dsp_serializes_with_type_tag() {
     use voxlfa_core::protocol::{DspLinkState, DspState, EqBand, EqBandKind, PresetId};
 

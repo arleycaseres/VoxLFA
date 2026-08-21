@@ -36,3 +36,7 @@ Thumbs.db
 # --- Logs y temporales ---
 *.log
 /tmp/
+
+# --- Variables de entorno (secretos) ---
+.env
+.env.*

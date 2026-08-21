@@ -267,6 +267,18 @@ fn execute_command(engine: &mut EngineManager, command: ControlCommand) -> Resul
                 .set_eq_band(band_index, gain_db)
                 .map_err(|err| err.to_string())
         }
+        ControlCommand::SetNoiseGate { params } => {
+            engine.set_noise_gate(params).map_err(|err| err.to_string())
+        }
+        ControlCommand::SetDenoise { params } => {
+            engine.set_denoise(params).map_err(|err| err.to_string())
+        }
+        ControlCommand::SetFeedback { params } => {
+            engine.set_feedback(params).map_err(|err| err.to_string())
+        }
+        ControlCommand::SetPitchCorrection { params } => engine
+            .set_pitch_correction(params)
+            .map_err(|err| err.to_string()),
     }
 }
 

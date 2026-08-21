@@ -99,6 +99,20 @@ export interface PitchCorrectionParams {
   mix: number;
 }
 
+/** Parámetros de supresión de ruido. */
+export interface DenoiseParams {
+  /** Mezcla seco/húmedo (0 = sin denoise, 1 = denoise completo). */
+  mix: number;
+}
+
+/** Parámetros de supresión de feedback adaptativa. */
+export interface FeedbackSuppressorParams {
+  /** Umbral de detección en dBFS. */
+  thresholdDb: number;
+  /** Factor de calidad de los filtros notch. */
+  q: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -108,6 +122,10 @@ export interface DspLinkState {
   eqBands: EqBand[] | null;
   /** Parámetros actuales de la puerta si este módulo es la puerta; si no, `null`. */
   gateParams: NoiseGateParams | null;
+  /** Parámetros de denoise si este módulo es denoise; si no, `null`. */
+  denoiseParams: DenoiseParams | null;
+  /** Parámetros de feedback si este módulo es feedback; si no, `null`. */
+  feedbackParams: FeedbackSuppressorParams | null;
   /** Parámetros de pitch correction si este módulo es pitch correction; si no, `null`. */
   pitchCorrectionParams: PitchCorrectionParams | null;
 }
@@ -152,7 +170,8 @@ export type SuggestionAction =
   | { type: "setEqBand"; bandIndex: number; gainDb: number }
   | { type: "setDenoise"; mix: number }
   | { type: "setFeedback"; thresholdDb: number; q: number }
-  | { type: "setPitchCorrection"; strength: number; mix: number };
+  | { type: "setPitchCorrection"; strength: number; mix: number }
+  | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {
@@ -195,7 +214,11 @@ export type ControlCommand =
   | { type: "setPreset"; preset: PresetId }
   | { type: "setGlobalBypass"; bypass: boolean }
   | { type: "setLinkBypass"; link: string; bypass: boolean }
-  | { type: "setEqBand"; bandIndex: number; gainDb: number };
+  | { type: "setEqBand"; bandIndex: number; gainDb: number }
+  | { type: "setNoiseGate"; params: NoiseGateParams }
+  | { type: "setDenoise"; params: DenoiseParams }
+  | { type: "setFeedback"; params: FeedbackSuppressorParams }
+  | { type: "setPitchCorrection"; params: PitchCorrectionParams };
 
 /**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).

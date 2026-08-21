@@ -1,7 +1,7 @@
 import type { SessionSummary } from "../lib/types";
 import { useEffect, useRef, useState } from "react";
 
-export function SessionSummaryFooter({ summary, onRefresh, onRequestAi, aiLoading }: {
+export function SessionSummaryFooter({ summary, onRefresh, onRequestAi: _onRequestAi, aiLoading: _aiLoading }: {
   summary: SessionSummary | null;
   onRefresh: () => void;
   onRequestAi: () => void;

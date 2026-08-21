@@ -32,6 +32,7 @@ use super::presets::PresetFactory;
 struct DenoiseMix {
     inner: Box<dyn AudioProcessor>,
     mix: f32,
+    denoised_buf: Vec<f32>,
 }
 
 impl DenoiseMix {
@@ -39,6 +40,7 @@ impl DenoiseMix {
         Self {
             inner,
             mix: mix.clamp(0.0, 1.0),
+            denoised_buf: Vec::new(),
         }
     }
 }
@@ -51,13 +53,13 @@ impl AudioProcessor for DenoiseMix {
         info: &ProcessingInfo,
     ) -> ProcessResult {
         let frames = input.len().min(output.len());
-        let mut denoised = vec![0.0f32; frames];
-        let result = self.inner.process(input, &mut denoised, info);
+        self.denoised_buf.resize(frames, 0.0);
+        let result = self.inner.process(input, &mut self.denoised_buf, info);
 
         let wet = self.mix;
         let dry = 1.0 - wet;
         for i in 0..frames {
-            output[i] = input[i] * dry + denoised[i] * wet;
+            output[i] = input[i] * dry + self.denoised_buf[i] * wet;
         }
 
         result

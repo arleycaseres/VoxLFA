@@ -87,6 +87,13 @@ pub enum SuggestionAction {
         /// Mezcla seco/húmedo (0–1).
         mix: f32,
     },
+    /// Ajustar la puerta de ruido.
+    SetNoiseGate {
+        /// Umbral (dBFS) a partir del cual se abre la puerta.
+        threshold_db: f32,
+        /// Atenuación máxima al cerrar (dB).
+        range_db: f32,
+    },
 }
 
 /// Sugerencia generada por el motor de análisis para la voz actual.

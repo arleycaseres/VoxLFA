@@ -224,6 +224,10 @@ struct PsolaShifter {
     energy: f32,
     /// Estado de detección de pico (true = buscando pico ascendente).
     rising: bool,
+    /// Buffer reutilizable para épocas detectadas (evita alloc por frame).
+    epochs_buf: Vec<f32>,
+    /// Buffer reutilizable para ventana PSOLA (evita alloc por época).
+    windowed_buf: Vec<f32>,
 }
 
 impl PsolaShifter {
@@ -238,6 +242,8 @@ impl PsolaShifter {
             ring_size,
             energy: 0.0,
             rising: false,
+            epochs_buf: Vec::new(),
+            windowed_buf: Vec::new(),
         }
     }
 
@@ -265,7 +271,7 @@ impl PsolaShifter {
         }
 
         // 2) Detectar épocas (picos de energía local con onset).
-        let mut epochs_in: Vec<f32> = Vec::new();
+        self.epochs_buf.clear();
         let mut energy_acc = 0.0f32;
         for (i, &sample) in input.iter().enumerate().take(frames) {
             energy_acc += sample * sample;
@@ -282,13 +288,13 @@ impl PsolaShifter {
                 self.rising = true;
             } else if norm_energy < 0.5 && self.rising {
                 self.rising = false;
-                epochs_in.push(i as f32);
+                self.epochs_buf.push(i as f32);
             }
         }
 
         // 3) Si no hay épocas detectadas o poca energía, paso directo.
         let rms: f32 = (input.iter().map(|x| x * x).sum::<f32>() / frames as f32).sqrt();
-        if rms < 0.005 || epochs_in.is_empty() {
+        if rms < 0.005 || self.epochs_buf.is_empty() {
             output[..frames].copy_from_slice(&input[..frames]);
             return;
         }
@@ -300,7 +306,7 @@ impl PsolaShifter {
         let mut out_pos = 0.0f32;
         let mut prev_out = 0.0f32;
 
-        for &epoch in &epochs_in {
+        for &epoch in &self.epochs_buf {
             let new_spacing = (epoch - self.prev_epoch_in) / self.smooth_ratio;
             if new_spacing <= 0.0 || new_spacing > YIN_FRAME_SIZE as f32 {
                 self.prev_epoch_in = epoch;
@@ -312,8 +318,8 @@ impl PsolaShifter {
 
             // Ventana Hann.
             let win_size = YIN_FRAME_SIZE.min(frames);
-            let mut windowed = vec![0.0f32; win_size];
-            for (i, win) in windowed.iter_mut().enumerate().take(win_size) {
+            self.windowed_buf.resize(win_size, 0.0);
+            for (i, win) in self.windowed_buf[..win_size].iter_mut().enumerate() {
                 let hann =
                     0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / win_size as f32).cos());
                 let in_idx = (in_start as usize + i).min(frames - 1);
@@ -322,7 +328,7 @@ impl PsolaShifter {
 
             // Escribir en output con el espaciamiento corregido.
             let out_start = out_pos as usize;
-            for (i, win) in windowed.iter().enumerate().take(win_size) {
+            for (i, win) in self.windowed_buf[..win_size].iter().enumerate() {
                 let idx = out_start + i;
                 if idx < output.len() {
                     output[idx] += *win;
