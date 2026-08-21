@@ -4,7 +4,8 @@
 //! real mediante [`crate::dsp::chain::ChainProcessor`].
 
 use crate::protocol::{
-    DspModuleKind, DspModuleSpec, EqBand, EqBandKind, NoiseGateParams, PresetId, PresetInfo,
+    DelayMode, DspModuleKind, DspModuleSpec, EqBand, EqBandKind, NoiseGateParams, PresetId,
+    PresetInfo, ReverbMode,
 };
 
 /// Fábrica de presets: devuelve la especificación de cadena de cada uno.
@@ -89,7 +90,8 @@ impl PresetFactory {
 }
 
 /// Voz limpia: pasa-altos, denoise, feedback, puerta de ruido, antifeedback
-/// (boominess), EQ suave, de-esser, compresor transparente y limiter.
+/// (boominess), EQ suave, de-esser, compresor transparente, slapback sutil,
+/// plate reverb y limiter.
 fn voce_limpia() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 80.0 }),
@@ -102,7 +104,7 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
             threshold_db: -50.0,
             attack_ms: 2.0,
             release_ms: 100.0,
-            hold_ms: 25.0,
+            hold_ms: 120.0,
             range_db: 40.0,
         }),
         module(DspModuleKind::BoomSuppressor {
@@ -129,6 +131,27 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
             release_ms: 80.0,
             makeup_db: 3.0,
         }),
+        module(DspModuleKind::Delay {
+            mode: DelayMode::Slapback,
+            time_ms: 65.0,
+            feedback: 0.0,
+            mix: 0.08,
+            pre_delay_ms: 0.0,
+            low_cut_hz: 200.0,
+            high_cut_hz: 6000.0,
+            tempo_bpm: 120.0,
+            sync_enabled: false,
+            duck_amount: 0.3,
+        }),
+        module(DspModuleKind::Reverb {
+            mode: ReverbMode::Plate,
+            room_size: 0.3,
+            damping: 0.3,
+            wet: 0.08,
+            pre_delay_ms: 15.0,
+            high_cut_hz: 7000.0,
+            low_cut_hz: 200.0,
+        }),
         module(DspModuleKind::Limiter {
             threshold_db: -1.0,
             lookahead_ms: 3.0,
@@ -138,7 +161,8 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
 }
 
 /// Radio: banda estrecha (pasa-altos + shelf de agudos), denoise, feedback,
-/// puerta de ruido, notch antifeedback, saturación y comp.
+/// puerta de ruido, notch antifeedback, saturación, tape delay, reverb room
+/// y comp.
 fn radio() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 250.0 }),
@@ -151,7 +175,7 @@ fn radio() -> Vec<DspModuleSpec> {
             threshold_db: -45.0,
             attack_ms: 1.0,
             release_ms: 80.0,
-            hold_ms: 15.0,
+            hold_ms: 120.0,
             range_db: 45.0,
         }),
         module(DspModuleKind::Notch {
@@ -175,6 +199,27 @@ fn radio() -> Vec<DspModuleSpec> {
             release_ms: 120.0,
             makeup_db: 6.0,
         }),
+        module(DspModuleKind::Delay {
+            mode: DelayMode::Tape,
+            time_ms: 120.0,
+            feedback: 0.3,
+            mix: 0.15,
+            pre_delay_ms: 0.0,
+            low_cut_hz: 300.0,
+            high_cut_hz: 4000.0,
+            tempo_bpm: 120.0,
+            sync_enabled: false,
+            duck_amount: 0.2,
+        }),
+        module(DspModuleKind::Reverb {
+            mode: ReverbMode::Room,
+            room_size: 0.25,
+            damping: 0.4,
+            wet: 0.1,
+            pre_delay_ms: 10.0,
+            high_cut_hz: 5000.0,
+            low_cut_hz: 300.0,
+        }),
         module(DspModuleKind::Limiter {
             threshold_db: -1.0,
             lookahead_ms: 3.0,
@@ -184,7 +229,7 @@ fn radio() -> Vec<DspModuleSpec> {
 }
 
 /// Warm: bajos suaves con denoise, feedback, puerta de ruido y antifeedback
-/// (boominess), presencia vocal, compresión ligera y toque de reverb.
+/// (boominess), presencia vocal, compresión ligera, digital delay y plate reverb.
 fn warm() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 70.0 }),
@@ -197,7 +242,7 @@ fn warm() -> Vec<DspModuleSpec> {
             threshold_db: -48.0,
             attack_ms: 3.0,
             release_ms: 120.0,
-            hold_ms: 30.0,
+            hold_ms: 120.0,
             range_db: 40.0,
         }),
         module(DspModuleKind::BoomSuppressor {
@@ -219,10 +264,26 @@ fn warm() -> Vec<DspModuleSpec> {
             release_ms: 150.0,
             makeup_db: 4.0,
         }),
+        module(DspModuleKind::Delay {
+            mode: DelayMode::Digital,
+            time_ms: 80.0,
+            feedback: 0.25,
+            mix: 0.1,
+            pre_delay_ms: 0.0,
+            low_cut_hz: 150.0,
+            high_cut_hz: 8000.0,
+            tempo_bpm: 120.0,
+            sync_enabled: false,
+            duck_amount: 0.4,
+        }),
         module(DspModuleKind::Reverb {
-            room_size: 0.35,
+            mode: ReverbMode::Plate,
+            room_size: 0.4,
             damping: 0.3,
             wet: 0.12,
+            pre_delay_ms: 20.0,
+            high_cut_hz: 7000.0,
+            low_cut_hz: 200.0,
         }),
         module(DspModuleKind::Limiter {
             threshold_db: -1.0,

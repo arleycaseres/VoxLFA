@@ -23,58 +23,61 @@ El núcleo compartido está en `core/`; la UI de escritorio solo es una cáscara
 que se comunica con él. El móvil no duplica lógica de audio: se conecta al motor
 que corre en el escritorio.
 
-## Cambios recientes (Frontend)
+## Cambios recientes
 
-- Reestructurado el panel de `Sugerencias` para mayor jerarquía y usabilidad:
-    - Se separó la sección de `Estado actual` (métricas) y queda colapsada por defecto.
-    - `Sugerencias activas` muestra hasta 3 sugerencias ordenadas por severidad, con opción `Ver todas`.
-    - Las sugerencias usan una estructura tipada obligatoria: `detected`, `consequence`, `recommendation`, `severity`.
-    - El descarte de sugerencias (`dismiss`) persiste en `sessionStorage` durante la sesión.
+### Efectos multi-modo profesionales (Fase 9) ✅
 
-- Mejora de `Presets`:
-    - Lista de presets es ahora un grid responsivo (`auto-fit`/`minmax`) que evita overflow.
-    - `PresetCard` reestructurada en columnas (left/right), con truncado seguro y metadatos accesibles.
+Delay y reverb multi-modo con calidad de concierto:
 
-- Cabecera y logos:
-    - Se integraron los logos en `desktop/src/assets/brand/` y se usan en la cabecera.
+- **Delay**: 4 modos (Digital limpio, Analog cálido con degradación, Tape vintage
+  con wow & flutter, Slapback para ensanchamiento vocal). Incluye pre-delay,
+  filtros HP/LP en señal wet, y ducking (el delay se atenúa cuando cantas).
+- **Reverb**: 3 modos (Placa densa y brillante para vocales, Sala envolvente
+  para espacios grandes, Habitación corta y natural). Incluye pre-delay para
+  separar la voz de la cola, y filtros HP/LP en la señal de retorno.
+- **Presets actualizados**: VozLimpia (Slapback 65ms + Plate), Radio (Tape 120ms
+  + Room), Warm (Digital 80ms + Plate).
+- **UI completa**: paneles DelayPanel y ReverbPanel con selectores de modo,
+  sliders de todos los parámetros, CSS y conexión a useEngine.
 
-- IA y sesión:
-    - Eliminado botón duplicado `Pedir consejo a la IA` (ahora solo en el panel de IA).
-    - `Actualizar resumen` muestra estado de refresco y renderiza campos con comprobaciones seguras.
+### Mejoras de fases anteriores
 
-- Responsividad y accesibilidad:
-    - Variables globales para transiciones y breakpoints (`desktop/src/lib/uiConstants.ts` y CSS variables).
-    - Botones y controles con áreas táctiles mínimas; SVGs y medidores preparados para escalado.
+- **Noise gate hold**: 25ms → 120ms (trabaja el trino "rrrrr" sin cortar).
+- **Buffer USB inteligente**: clasificación por tier (Gama alta=128, media/baja=
+  512, genérico=256) en vez de 256 fijo para todos.
+- **Denoise offloaded**: inferencia ONNX en hilo dedicado con ring buffers
+  (fuera del callback de audio).
+- **IA advisor**: prompt comprimido (~1200 tokens), modelo GPT-OSS-20B (1000 TPS),
+  reintentos en rate-limit, contenido vacío reportado correctamente.
 
-Pruebas rápidas:
+### Panel de sugerencias flotante
 
-```bash
-cd desktop
-npm run dev -- --port 1421
-```
+- Barra flotante con toggle show/hide (persiste en localStorage).
+- SuggestionCard muestra el panel exacto donde aplicar cada sugerencia.
 
-Abrir http://localhost:1421 y verificar:
-- Panel de Sugerencias (máx. 3 visibles, `Ver todas`).
-- Presets: nombres largos no generan overflow.
-- Cabecera muestra los logos correctamente.
-
-Si detectas problemas visuales indica el componente y la resolución y lo ajustaré.
+---
 
 ## Roadmap
 
 Ver [`docs/roadmap.md`](docs/roadmap.md) para el detalle completo por fases.
-Estado actual: **Fase 1 completada — DSP en tiempo real** (cadena de módulos
-vocal con presets aplicables en vivo y niveles pre/post).
+Estado actual: **Fase 9 completada — Efectos multi-modo profesionales** (delay y
+reverb con calidad de concierto).
 
 - [x] Monorepo (`core` / `desktop` / `mobile`)
 - [x] Pipeline de audio: captura → cadena DSP → salida con medición de latencia
-- [x] Módulos DSP: EQ, compresor, de-esser, saturación, delay, reverb, limiter
+- [x] Módulos DSP: EQ, compresor, de-esser, saturación, limiter
+- [x] Delay multi-modo (Digital, Analog, Tape, Slapback) + ducking + pre-delay
+- [x] Reverb multi-modo (Plate, Hall, Room) + pre-delay
 - [x] Presets aplicables en vivo (Voz Limpia, Radio, Warm) con bypass por módulo
-- [x] Protocolo de comunicación core ↔ UI (incluido canal WebSocket para móvil)
-- [x] Cabina de escritorio (presets, cadena, dial y medidores pre/post)
-- [x] Emparejamiento móvil ↔ escritorio (WebSocket autenticado por token)
-- [x] App móvil Expo de monitoreo remoto (estado, latencia, niveles, preset)
-- [ ] Fase 2 — IA (ruido, feedback, claridad, tono) — ver roadmap
+- [x] Denoise ONNX (DeepFilterNet3) offloaded a hilo dedicado
+- [x] Supresión de feedback adaptativa + boom suppressor
+- [x] Corrección tono (YIN + PSOLA, escalas musicales)
+- [x] Asistente IA local (Groq/GPT-OSS-20B, sugerencias contextuales)
+- [x] Visualizador de espectro FFT (32 bandas logarítmicas)
+- [x] Persistencia por dispositivo (perfiles con EQ, gate, delay, reverb)
+- [x] Protocolo de comunicación core ↔ UI (incluido WebSocket para móvil)
+- [x] Emparejamiento móvil ↔ escritorio (WebSocket autenticado por token + QR)
+- [ ] Fase 10 — Efectos multi-modo: Feedback adaptativo mejorado (FIR), Dynamic EQ, Saturación multi-modo
 
 ## Requisitos
 

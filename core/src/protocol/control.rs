@@ -11,7 +11,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::dsp::{
-    DenoiseParams, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams, PresetId,
+    DelayParams, DenoiseParams, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams,
+    PresetId, ReverbParams,
 };
 
 /// Comando de control del motor, enviado por la UI (o el móvil) hacia el core.
@@ -77,5 +78,15 @@ pub enum ControlCommand {
     SetPitchCorrection {
         /// Nuevos parámetros de corrección de tono.
         params: PitchCorrectionParams,
+    },
+    /// Ajusta los parámetros del delay del preset activo (motor corriendo).
+    SetDelay {
+        /// Nuevos parámetros del delay.
+        params: DelayParams,
+    },
+    /// Ajusta los parámetros del reverb del preset activo (motor corriendo).
+    SetReverb {
+        /// Nuevos parámetros del reverb.
+        params: ReverbParams,
     },
 }

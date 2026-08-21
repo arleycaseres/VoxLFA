@@ -279,6 +279,12 @@ fn execute_command(engine: &mut EngineManager, command: ControlCommand) -> Resul
         ControlCommand::SetPitchCorrection { params } => engine
             .set_pitch_correction(params)
             .map_err(|err| err.to_string()),
+        ControlCommand::SetDelay { params } => {
+            engine.set_delay(params).map_err(|err| err.to_string())
+        }
+        ControlCommand::SetReverb { params } => {
+            engine.set_reverb(params).map_err(|err| err.to_string())
+        }
     }
 }
 

@@ -175,6 +175,54 @@ export interface PitchCorrectionParams {
   mix: number;
 }
 
+/** Modo del delay (tipo de carácter del eco). */
+export type DelayMode = "digital" | "analog" | "tape" | "slapback";
+
+/** Modo del reverb (tipo de algoritmo de reverberación). */
+export type ReverbMode = "plate" | "hall" | "room";
+
+/** Parámetros de delay (espejo de `core/src/protocol/dsp.rs`). */
+export interface DelayParams {
+  /** Modo del delay. */
+  mode: DelayMode;
+  /** Tiempo del eco en ms. */
+  timeMs: number;
+  /** Feedback (0–0.95). */
+  feedback: number;
+  /** Mezcla seco/húmedo (0–1). */
+  mix: number;
+  /** Pre-delay en ms. */
+  preDelayMs: number;
+  /** Corte de graves del eco en Hz. */
+  lowCutHz: number;
+  /** Corte de agudos del eco en Hz. */
+  highCutHz: number;
+  /** Tempo BPM para sincronizar el delay. */
+  tempoBpm: number;
+  /** `true` para sincronizar el tiempo del delay al tempo. */
+  syncEnabled: boolean;
+  /** Cantidad de ducking (0–1). */
+  duckAmount: number;
+}
+
+/** Parámetros de reverb (espejo de `core/src/protocol/dsp.rs`). */
+export interface ReverbParams {
+  /** Modo del reverb. */
+  mode: ReverbMode;
+  /** Tamaño de la sala (0–1). */
+  roomSize: number;
+  /** Amortiguación de agudos (0–1). */
+  damping: number;
+  /** Mezcla seco/húmedo (0–1). */
+  wet: number;
+  /** Pre-delay en ms. */
+  preDelayMs: number;
+  /** Corte de agudos de la cola del reverb en Hz. */
+  highCutHz: number;
+  /** Corte de graves del return del reverb en Hz. */
+  lowCutHz: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   /** Nombre corto del módulo (identificador para el bypass). */
@@ -193,6 +241,10 @@ export interface DspLinkState {
   feedbackParams: FeedbackSuppressorParams | null;
   /** Parámetros de pitch correction si este módulo es pitch correction; si no, `null`. */
   pitchCorrectionParams: PitchCorrectionParams | null;
+  /** Parámetros de delay si este módulo es delay; si no, `null`. */
+  delayParams: DelayParams | null;
+  /** Parámetros de reverb si este módulo es reverb; si no, `null`. */
+  reverbParams: ReverbParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -240,6 +292,18 @@ export interface DeviceProfile {
   preset: PresetId;
   /** Ajuste fino del EQ (bandas actuales) para el preset de este perfil. */
   eqBands: EqBand[];
+  /** Parámetros de gate si se ajustaron en vivo. */
+  gateParams?: NoiseGateParams | null;
+  /** Parámetros de denoise si se ajustaron en vivo. */
+  denoiseParams?: DenoiseParams | null;
+  /** Parámetros de feedback si se ajustaron en vivo. */
+  feedbackParams?: FeedbackSuppressorParams | null;
+  /** Parámetros de pitch correction si se ajustaron en vivo. */
+  pitchCorrectionParams?: PitchCorrectionParams | null;
+  /** Parámetros de delay si se ajustaron en vivo. */
+  delayParams?: DelayParams | null;
+  /** Parámetros de reverb si se ajustaron en vivo. */
+  reverbParams?: ReverbParams | null;
   /** `true` si el bypass global estaba activo al guardar. */
   globalBypass: boolean;
   /** Bypass por módulo que estaba activo al guardar. */
@@ -298,7 +362,9 @@ export type SuggestionAction =
   | { type: "setDenoise"; mix: number }
   | { type: "setFeedback"; thresholdDb: number; q: number }
   | { type: "setPitchCorrection"; strength: number; mix: number }
-  | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number };
+  | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number }
+  | { type: "setDelay"; timeMs: number; mix: number }
+  | { type: "setReverb"; wet: number; roomSize: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {

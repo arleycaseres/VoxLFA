@@ -15,6 +15,8 @@ pub mod delay;
 pub mod denoise;
 #[cfg(feature = "onnx")]
 pub mod denoise_onnx;
+#[cfg(feature = "audio")]
+pub mod denoise_thread;
 pub mod eq;
 pub mod feedback;
 pub mod gain;
@@ -54,3 +56,11 @@ pub use presets::PresetFactory;
 pub use processor::{AudioProcessor, ProcessResult, ProcessingInfo};
 pub use reverb::Reverb;
 pub use saturator::Saturator;
+
+/// Tamaño máximo de bloque que el hilo de denoise procesa por iteración.
+///
+/// Equivale a `fft_size` de DeepFilterNet3 (960 muestras ≈ 20 ms a 48 kHz).
+/// Los bloques del callback (típicamente 128–1024 muestras) se agrupan hasta
+/// este límite antes de ejecutar la inferencia ONNX.
+#[cfg(feature = "audio")]
+pub const MAX_DENOISE_CHUNK: usize = 960;

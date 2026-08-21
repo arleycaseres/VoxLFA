@@ -83,7 +83,7 @@ mensajes JSON por el WebSocket para el móvil.
   "preset": "vozLimpia",
   "globalBypass": false,
   "links": [
-    { "name": "highpass",  "enabled": true, "bypass": false, "eqBands": null, "gateParams": null },
+    { "name": "highpass",  "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "delayParams": null, "reverbParams": null },
     {
       "name": "noisegate",
       "enabled": true,
@@ -93,11 +93,12 @@ mensajes JSON por el WebSocket para el móvil.
         "thresholdDb": -50,
         "attackMs": 2,
         "releaseMs": 100,
-        "holdMs": 25,
+        "holdMs": 120,
         "rangeDb": 40
-      }
+      },
+      "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "delayParams": null, "reverbParams": null
     },
-    { "name": "boomsuppressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null },
+    { "name": "boomsuppressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "delayParams": null, "reverbParams": null },
     {
       "name": "eq",
       "enabled": true,
@@ -107,11 +108,45 @@ mensajes JSON por el WebSocket para el móvil.
         { "kind": "peaking",  "freqHz": 3000, "gainDb": 2,    "q": 1.5 },
         { "kind": "highShelf","freqHz": 8000, "gainDb": 1.5,  "q": 0.8 }
       ],
-      "gateParams": null
+      "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "delayParams": null, "reverbParams": null
     },
-    { "name": "deesser",    "enabled": true, "bypass": false, "eqBands": null, "gateParams": null },
-    { "name": "compressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null },
-    { "name": "limiter",    "enabled": true, "bypass": false, "eqBands": null, "gateParams": null }
+    { "name": "deesser",    "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "delayParams": null, "reverbParams": null },
+    { "name": "compressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "delayParams": null, "reverbParams": null },
+    {
+      "name": "delay",
+      "enabled": true,
+      "bypass": false,
+      "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null,
+      "delayParams": {
+        "mode": "slapback",
+        "timeMs": 65,
+        "feedback": 0,
+        "mix": 0.08,
+        "preDelayMs": 0,
+        "lowCutHz": 200,
+        "highCutHz": 8000,
+        "tempoBpm": 120,
+        "syncEnabled": false,
+        "duckAmount": 0.3
+      },
+      "reverbParams": null
+    },
+    {
+      "name": "reverb",
+      "enabled": true,
+      "bypass": false,
+      "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "delayParams": null,
+      "reverbParams": {
+        "mode": "plate",
+        "roomSize": 0.5,
+        "damping": 0.5,
+        "wet": 0.08,
+        "preDelayMs": 15,
+        "highCutHz": 12000,
+        "lowCutHz": 100
+      }
+    },
+    { "name": "limiter",    "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "delayParams": null, "reverbParams": null }
   ]
 }
 ```
@@ -129,6 +164,17 @@ mensajes JSON por el WebSocket para el móvil.
   **actual** de la puerta de ruido (umbral, ataque, liberación, *hold* y rango),
   que cambia con el comando `set_noise_gate`. Los demás módulos lo envían a
   `null`. El móvil lo muestra en solo lectura (no lo ajusta).
+- `denoiseParams`: solo lo lleva el módulo `denoise` (mezcla wet/dry).
+- `feedbackParams`: solo lo lleva el módulo `feedbacksuppress` (umbral y Q).
+- `pitchCorrectionParams`: solo lo lleva el módulo `pitchcorrection` (strength,
+  mix, scale, root).
+- `delayParams`: solo lo lleva el módulo `delay`; incluye `mode` (digital/analog/
+  tape/slapback), `timeMs`, `feedback`, `mix`, `preDelayMs`, `lowCutHz`,
+  `highCutHz`, `tempoBpm`, `syncEnabled`, `duckAmount`. Se ajusta con
+  `set_delay`.
+- `reverbParams`: solo lo lleva el módulo `reverb`; incluye `mode` (plate/hall/
+  room), `roomSize`, `damping`, `wet`, `preDelayMs`, `highCutHz`, `lowCutHz`.
+  Se ajusta con `set_reverb`.
 - `latencyMs` (ver evento `status`) ya **incluye** la latencia propia de la
   cadena (p. ej. el limiter suma su lookahead).
 
@@ -256,6 +302,8 @@ campos en camelCase:
 | `set_link_bypass` | `{ name: string, bypass: boolean }` | `DspState` |
 | `set_eq_band` | `{ bandIndex: number, gainDb: number }` | `DspState` |
 | `set_noise_gate` | `{ params: NoiseGateParams }` | `DspState` |
+| `set_delay` | `{ params: DelayParams }` | `DspState` |
+| `set_reverb` | `{ params: ReverbParams }` | `DspState` |
 | `get_analysis` | — | `AnalysisSample \| null` |
 | `get_session_summary` | — | `SessionSummary \| null` |
 | `apply_suggestion` | `{ suggestionId: number }` | — |
@@ -288,8 +336,29 @@ móvil: solo lo consume la cabina para precargar los selectores.
         "thresholdDb": -48,
         "attackMs": 3,
         "releaseMs": 120,
-        "holdMs": 30,
+        "holdMs": 120,
         "rangeDb": 40
+      },
+      "delayParams": {
+        "mode": "digital",
+        "timeMs": 80,
+        "feedback": 0.25,
+        "mix": 0.1,
+        "preDelayMs": 0,
+        "lowCutHz": 200,
+        "highCutHz": 12000,
+        "tempoBpm": 120,
+        "syncEnabled": false,
+        "duckAmount": 0.4
+      },
+      "reverbParams": {
+        "mode": "plate",
+        "roomSize": 0.5,
+        "damping": 0.5,
+        "wet": 0.12,
+        "preDelayMs": 20,
+        "highCutHz": 12000,
+        "lowCutHz": 100
       },
       "globalBypass": false,
       "linkBypass": { "reverb": true }
@@ -302,10 +371,11 @@ móvil: solo lo consume la cabina para precargar los selectores.
   nombre del dispositivo, o `"default"` si se usó el predeterminado del
   sistema).
 - Al arrancar el motor con un dispositivo con perfil, se aplican su preset,
-  sus `eqBands`, sus `gateParams` y sus bypasses.
+  sus `eqBands`, sus `gateParams`, sus `delayParams`, sus `reverbParams` y sus
+  bypasses.
   `apply_preset`/`set_*_bypass` persisten al instante; el ajuste fino del EQ
-  (`set_eq_band`) y de la puerta de ruido (`set_noise_gate`) se vuelcan al
-  detener el motor.
+  (`set_eq_band`), de la puerta de ruido (`set_noise_gate`), del delay
+  (`set_delay`) y del reverb (`set_reverb`) se vuelcan al detener el motor.
 - Archivo tolerante a fallos: si falta o está corrupto se parte de la
   configuración vacía.
 
@@ -345,7 +415,8 @@ Los argumentos en JS usan camelCase (Tauri v2 los convierte desde snake_case).
 - Tráfico:
   - **Server → client**: eventos del motor (`status`, `level`, `dsp`, …).
   - **Client → server**: comandos `stop`, `setPreset`, `setGlobalBypass`,
-    `setLinkBypass` y `setEqBand` (JSON con `tag = "type"`). `start` se rechaza.
+    `setLinkBypass`, `setEqBand`, `setNoiseGate`, `setDelay` y `setReverb`
+    (JSON con `tag = "type"`). `start` se rechaza.
 - Comandos malformados o fallidos se responden con un evento `warning` dirigido
   al cliente que los envió.
 - Límites de entrada (seguridad): mensajes ≤ 1 KB; ganancia del EQ acotada a

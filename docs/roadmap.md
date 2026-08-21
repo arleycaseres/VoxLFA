@@ -317,3 +317,60 @@ u otras herramientas externas sin conflictos.
 > **Loopback macOS/Windows**: para routing de audio entre apps, el usuario
 > puede usar BlackHole (macOS) o VB-CABLE (Windows) como dispositivos
 > virtuales; VoxLFA los detecta y lista normalmente.
+
+## Fase 9 — Efectos multi-modo profesionales: Delay + Reverb ✅
+
+Objetivo: llevar la calidad del procesamiento vocal a nivel de concierto con
+efectos de tiempo multi-modo inspirados en estándares de la industria (Waves
+H-Delay, Soundtoys Echoboy, Bricasti M7, Valhalla).
+
+- [x] **Protocolo Rust**: `DelayMode` (Digital, Analog, Tape, Slapback),
+      `ReverbMode` (Plate, Hall, Room), `DelayParams` (mode, timeMs, feedback,
+      mix, preDelayMs, lowCutHz, highCutHz, tempoBpm, syncEnabled, duckAmount),
+      `ReverbParams` (mode, roomSize, damping, wet, preDelayMs, highCutHz,
+      lowCutHz) en `protocol/dsp.rs`.
+- [x] **Control en vivo**: `SetDelay` y `SetReverb` añadidos a `ControlCommand`
+      (`protocol/control.rs`) y `SuggestionAction` (`protocol/analysis.rs`).
+- [x] **DSP Delay multi-modo** (`delay.rs`): 4 modos (Digital limpio, Analog con
+      filtro LP en feedback, Tape con LFO wow & flutter, Slapback sin feedback),
+      pre-delay con `DelayLine` separado, filtros biquad HP/LP en señal wet,
+      ducking con envelope follower. `from_params()` + `new()` legacy.
+- [x] **DSP Reverb multi-modo** (`reverb.rs`): 3 modos (Plate: 6 combs + 3
+      allpass, Hall: 7 combs + 4 allpass, Room: 4 combs + 2 allpass),
+      `ReverbTopology` con tiempos y feedbacks por modo, room_size escala
+      feedback, pre-delay con `DelayLine`, filtros biquad HP/LP en return.
+      `from_params()` + `new()` legacy.
+- [x] **Chain integrada** (`chain.rs`): `delayParams` y `reverbParams` en
+      `ChainLink`, comandos `SetLinkDelay`/`SetLinkReverb`, helper functions
+      `delay_params_of()`/`reverb_params_of()`, `DspHandle::set_delay()` y
+      `set_reverb()` con reconstrucción + publicación de estado.
+- [x] **Presets actualizados**: VozLimpia (Slapback 65ms + Plate), Radio (Tape
+      120ms + Room), Warm (Digital 80ms + Plate) con campos completos en el
+      nuevo formato `DspModuleKind::Delay`/`DspModuleKind::Reverb`.
+- [x] **Persistencia**: `delayParams` y `reverbParams` en `DeviceProfile`
+      (`config.rs`), reaplicados al arrancar.
+- [x] **Escritorio**: comandos Tauri `set_delay`/`set_reverb` registrados,
+      handler WebSocket `SetDelay`/`SetReverb`.
+- [x] **Desktop TS**: tipos `DelayMode`, `ReverbMode`, `DelayParams`,
+      `ReverbParams` en `types.ts`; funciones `setDelay()`/`setReverb()` en
+      `tauri.ts` y `mock.ts`.
+- [x] **Móvil**: tipos sincronizados en `protocol.ts` (`DelayMode`, `ReverbMode`,
+      `DelayParams`, `ReverbParams`, `DspLinkState` con campos nuevos).
+- [x] **UI Desktop**: `DelayPanel.tsx` (selector de modo, time, feedback, mix,
+      pre-delay, low/high cut, ducking) y `ReverbPanel.tsx` (selector de modo,
+      room size, damping, wet, pre-delay, low/high cut), ambos con CSS y
+      conectados a `useEngine.ts` → `App.tsx`.
+- [x] **Análisis/IA**: `SetDelay` y `SetReverb` en `SuggestionAction` con
+      handlers en `analysis/handle.rs`.
+- [x] Verificación completa (fmt, clippy, 182 tests, builds desktop y móvil).
+
+> **Plan de fases de efectos multi-modo** (3 fases):
+>
+> - **Fase 9** ✅: Delay + Reverb (máxima prioridad, más impacto inmediato)
+> - **Fase 10** (siguiente): Supresión de feedback adaptativa mejorada (FIR),
+>       Dynamic EQ (compresor por banda de frecuencia), Saturación multi-modo
+>       (Tube/Tape/Tube+Tape)
+> - **Fase 11** (futuro): Harmonizer vocal, Send/Return FX routing, Presets
+>       Monitor/FOH separados, Módulo "Sculpt" (un solo control de tono)
+> - **Fase 12** (futuro): Aislamiento de voz en tiempo real, Corrección
+>       adaptativa de sala, Mejora vocal con IA

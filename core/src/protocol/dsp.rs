@@ -109,6 +109,83 @@ pub struct FeedbackSuppressorParams {
     pub q: f32,
 }
 
+/// Modo del delay (tipo de carácter del eco).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DelayMode {
+    /// Eco digital limpio (sin degradación).
+    Digital,
+    /// Eco analógico con degradación tonal (filtro LP en feedback).
+    Analog,
+    /// Eco de cinta con wow & flutter (modulación LFO en delay).
+    Tape,
+    /// Slapback: eco corto (60-120 ms) sin feedback, una sola repetición.
+    Slapback,
+}
+
+/// Modo del reverb (tipo de algoritmo de reverberación).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReverbMode {
+    /// Reverb de placa metálica (estándar para vocales en vivo).
+    Plate,
+    /// Reverb de sala de concierto grande.
+    Hall,
+    /// Reverb de sala pequeña-mediana (presencia natural).
+    Room,
+}
+
+/// Parámetros de delay (espejo de `dsp::delay::Delay`).
+///
+/// Se transportan en `DspModuleKind::Delay` y en `DspLinkState::delay_params`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DelayParams {
+    /// Modo del delay.
+    pub mode: DelayMode,
+    /// Tiempo del eco en ms.
+    pub time_ms: f32,
+    /// Feedback (0–0.95): cantidad del eco que vuelve a entrar.
+    pub feedback: f32,
+    /// Mezcla seco/húmedo (0 = seco, 1 = eco completo).
+    pub mix: f32,
+    /// Pre-delay en ms (separación del eco respecto a la señal seca).
+    pub pre_delay_ms: f32,
+    /// Corte de graves del eco en Hz (50–500).
+    pub low_cut_hz: f32,
+    /// Corte de agudos del eco en Hz (1000–20000).
+    pub high_cut_hz: f32,
+    /// Tempo BPM para sincronizar el delay (solo relevante si `sync_enabled`).
+    pub tempo_bpm: f32,
+    /// `true` para sincronizar el tiempo del delay al tempo.
+    pub sync_enabled: bool,
+    /// Cantidad de ducking (0–1): atenuación del delay cuando la voz habla.
+    pub duck_amount: f32,
+}
+
+/// Parámetros de reverb (espejo de `dsp::reverb::Reverb`).
+///
+/// Se transportan en `DspModuleKind::Reverb` y en `DspLinkState::reverb_params`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReverbParams {
+    /// Modo del reverb.
+    pub mode: ReverbMode,
+    /// Tamaño de la sala (0–1).
+    pub room_size: f32,
+    /// Amortiguación de agudos (0–1).
+    pub damping: f32,
+    /// Mezcla seco/húmedo (0 = seco, 1 = 100% wet).
+    pub wet: f32,
+    /// Pre-delay en ms (separa la señal seca de la reverberada).
+    pub pre_delay_ms: f32,
+    /// Corte de agudos de la cola del reverb en Hz (500–20000).
+    pub high_cut_hz: f32,
+    /// Corte de graves del return del reverb en Hz (50–500).
+    /// Clave para evitar "mud" en mezcla en vivo.
+    pub low_cut_hz: f32,
+}
+
 /// Nota musical raíz para la escala de corrección de tono.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -274,23 +351,45 @@ pub enum DspModuleKind {
         /// Mezcla seco/húmedo (0 = seco, 1 = saturado).
         mix: f32,
     },
-    /// Delay (eco) con feedback.
+    /// Delay (eco) con feedback y múltiples modos.
     Delay {
+        /// Modo del delay.
+        mode: DelayMode,
         /// Tiempo del eco (ms).
         time_ms: f32,
-        /// Feedback (0–1): cantidad del eco que vuelve a entrar.
+        /// Feedback (0–0.95): cantidad del eco que vuelve a entrar.
         feedback: f32,
         /// Mezcla seco/húmedo (0 = seco, 1 = eco completo).
         mix: f32,
+        /// Pre-delay en ms (separación del eco respecto a la señal seca).
+        pre_delay_ms: f32,
+        /// Corte de graves del eco en Hz.
+        low_cut_hz: f32,
+        /// Corte de agudos del eco en Hz.
+        high_cut_hz: f32,
+        /// Tempo BPM para sincronizar el delay.
+        tempo_bpm: f32,
+        /// `true` para sincronizar el tiempo del delay al tempo.
+        sync_enabled: bool,
+        /// Cantidad de ducking (0–1): atenuación del delay cuando la voz habla.
+        duck_amount: f32,
     },
-    /// Reverberación (Schroeder).
+    /// Reverberación con múltiples algoritmos.
     Reverb {
+        /// Modo del reverb.
+        mode: ReverbMode,
         /// Tamaño de la sala (0–1).
         room_size: f32,
-        /// Amortiguación de la cola (0–1).
+        /// Amortiguación de agudos (0–1).
         damping: f32,
         /// Mezcla seco/húmedo (0 = seco, 1 = reverb completo).
         wet: f32,
+        /// Pre-delay en ms (separa la señal seca de la reverberada).
+        pre_delay_ms: f32,
+        /// Corte de agudos de la cola del reverb en Hz.
+        high_cut_hz: f32,
+        /// Corte de graves del return del reverb en Hz.
+        low_cut_hz: f32,
     },
     /// Limitador de seguridad con lookahead (evita clipping).
     Limiter {
@@ -362,6 +461,12 @@ pub struct DspLinkState {
     /// correction; `None` en los demás. Refleja los ajustes en vivo con
     /// `set_pitch_correction`.
     pub pitch_correction_params: Option<PitchCorrectionParams>,
+    /// Parámetros actuales de delay si este módulo es delay; `None` en los
+    /// demás. Refleja los ajustes en vivo con `set_delay`.
+    pub delay_params: Option<DelayParams>,
+    /// Parámetros actuales de reverb si este módulo es reverb; `None` en los
+    /// demás. Refleja los ajustes en vivo con `set_reverb`.
+    pub reverb_params: Option<ReverbParams>,
 }
 
 /// Estado completo de la cadena DSP activa.

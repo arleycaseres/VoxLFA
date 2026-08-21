@@ -9,6 +9,7 @@ import { SPECTRUM_BIN_COUNT } from "./types";
 import type {
   AnalysisSample,
   AppConfig,
+  DelayParams,
   DenoiseParams,
   DeviceList,
   DspLinkState,
@@ -25,6 +26,7 @@ import type {
   PitchCorrectionParams,
   PresetId,
   PresetInfo,
+  ReverbParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -234,6 +236,8 @@ function buildDspState(preset: PresetId): DspState {
     denoiseParams: name === "denoise" ? PRESET_DENOISE[preset] : null,
     feedbackParams: name === "feedback" ? PRESET_FEEDBACK[preset] : null,
     pitchCorrectionParams: null,
+    delayParams: null,
+    reverbParams: null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -664,6 +668,32 @@ export function setPitchCorrection(params: PitchCorrectionParams): Promise<void>
     links: dspState.links.map((item) =>
       item.name === "pitch_correction"
         ? { ...item, pitchCorrectionParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setDelay(params: DelayParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "delay"
+        ? { ...item, delayParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setReverb(params: ReverbParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "reverb"
+        ? { ...item, reverbParams: params }
         : item,
     ),
   };

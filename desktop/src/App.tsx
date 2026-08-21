@@ -20,6 +20,8 @@ import { GatePanel } from "./components/GatePanel";
 import { DenoisePanel } from "./components/DenoisePanel";
 import { FeedbackPanel } from "./components/FeedbackPanel";
 import { PitchCorrectionPanel } from "./components/PitchCorrectionPanel";
+import { DelayPanel } from "./components/DelayPanel";
+import { ReverbPanel } from "./components/ReverbPanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
 import { FloatingSuggestion } from "./components/FloatingSuggestion";
 import { SpectrumView } from "./components/SpectrumView";
@@ -310,6 +312,20 @@ export default function App() {
             dsp={engine.dsp}
             running={running}
             onSetPitchCorrection={(params) => void engine.setPitchCorrection(params)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Delay</h2>
+          <DelayPanel
+            dsp={engine.dsp}
+            running={running}
+            onSetDelay={(params) => void engine.setDelay(params)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Reverb</h2>
+          <ReverbPanel
+            dsp={engine.dsp}
+            running={running}
+            onSetReverb={(params) => void engine.setReverb(params)}
           />
 
           {engine.error && <p className="controls__error">{engine.error}</p>}

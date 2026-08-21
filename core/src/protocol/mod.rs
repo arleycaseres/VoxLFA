@@ -21,9 +21,9 @@ pub use analysis::{
 };
 pub use control::ControlCommand;
 pub use dsp::{
-    DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState, EqBand, EqBandKind,
-    FeedbackSuppressorParams, MusicalNote, MusicalScale, NoiseGateParams, PitchCorrectionParams,
-    PresetId, PresetInfo,
+    DelayMode, DelayParams, DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState,
+    EqBand, EqBandKind, FeedbackSuppressorParams, MusicalNote, MusicalScale, NoiseGateParams,
+    PitchCorrectionParams, PresetId, PresetInfo, ReverbMode, ReverbParams,
 };
 pub use event::{
     AudioDeviceInfo, AudioHostInfo, EngineEvent, EngineState, EngineStatus, LevelSample,

@@ -30,8 +30,10 @@ use crate::analysis::{
     AnalysisHandle, AnalysisShared, BandSplitter, SessionTracker, SpectrumAnalyzer,
     SuggestionEngine, VoiceAnalyzer, VoiceFrame,
 };
-use crate::dsp::DspHandle;
-use crate::dsp::{AudioProcessor, ChainProcessor, DspCommand, LevelMeter, ProcessingInfo};
+use crate::dsp::denoise_thread::{self, AtomicF32, DenoiseHandle, DenoiseShared};
+use crate::dsp::{
+    AudioProcessor, ChainProcessor, DspCommand, DspHandle, LevelMeter, ProcessingInfo,
+};
 use crate::error::Error;
 use crate::protocol::{
     AnalysisSample, AudioDeviceInfo, AudioHostInfo, EngineEvent, EngineState, EngineStatus,
@@ -71,6 +73,12 @@ const ANALYSIS_EMIT_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Capacidad del canal callback → hilo de análisis (marcos).
 const ANALYSIS_CHANNEL_CAPACITY: usize = 64;
+
+/// Capacidad de los ring buffers de denoise (muestras).
+///
+/// ~85 ms a 48 kHz: suficiente para absorber la jitter entre el callback
+/// y el hilo de denoise.
+const DENOISE_RING_CAPACITY: usize = 4096;
 
 /// Latencia reportada antes de que haya señal circulando.
 const LATENCY_UNKNOWN: f32 = 0.0;
@@ -301,6 +309,50 @@ impl AudioEngine {
         let (analysis_tx, analysis_rx) =
             mpsc::sync_channel::<VoiceFrame>(ANALYSIS_CHANNEL_CAPACITY);
 
+        // --- Hilo de denoise offloaded ----------------------------------------
+        // Si el preset tiene denoise ONNX, se lanza un hilo dedicado que
+        // ejecuta la inferencia fuera del callback de audio. El callback envía
+        // audio crudo por un ring buffer y recibe el resultado denoiseado por
+        // otro. Si el hilo se retrasa, el callback usa la señal sin denoise.
+        let denoise_shared = Arc::new(DenoiseShared {
+            enabled: AtomicBool::new(false),
+            mix: AtomicF32::new(0.0),
+        });
+        let stop_denoise = Arc::new(AtomicBool::new(false));
+        let mut denoise_handle: Option<DenoiseHandle> = None;
+
+        // Buffers reutilizables para denoise en el callback.
+        let mut denoise_in_buf = Vec::with_capacity(max_frames);
+        let mut denoise_out_buf = Vec::with_capacity(max_frames);
+
+        // Ring buffers para comunicación callback ↔ hilo de denoise.
+        // Siempre se crean (el callback los ignora si no hay hilo).
+        let (mut denoise_in_prod, denoise_in_cons) =
+            HeapRb::<f32>::new(DENOISE_RING_CAPACITY).split();
+        let (denoise_out_prod, mut denoise_out_cons) =
+            HeapRb::<f32>::new(DENOISE_RING_CAPACITY).split();
+
+        // Lanzar el hilo de denoise si el preset tiene denoise y los modelos
+        // ONNX están disponibles.
+        if initial_chain.has_denoise() {
+            match denoise_thread::spawn_denoise_thread(
+                build_denoise_processor(sample_rate, max_frames),
+                sample_rate,
+                denoise_in_cons,
+                denoise_out_prod,
+                denoise_shared.clone(),
+                stop_denoise.clone(),
+            ) {
+                Ok(handle) => {
+                    denoise_handle = Some(handle);
+                    log::info!("denoise thread spawned (offloaded mode)");
+                }
+                Err(e) => {
+                    log::warn!("denoise offload failed, using inline: {e}");
+                }
+            }
+        }
+
         // --- Stream de entrada (captura) -------------------------------------
         let mut level_meter = LevelMeter::new();
         let mut output_meter = LevelMeter::new();
@@ -370,16 +422,53 @@ impl AudioEngine {
                             DspCommand::SetPitchCorrection { processor, params } => {
                                 chain.set_link_pitch_correction(processor, params);
                             }
+                            DspCommand::SetLinkDelay { processor, params } => {
+                                chain.set_link_delay(processor, params);
+                            }
+                            DspCommand::SetLinkReverb { processor, params } => {
+                                chain.set_link_reverb(processor, params);
+                            }
                         }
                     }
 
-                    // 1) Pasar el bloque por la cadena DSP del preset activo.
+                    // 1) Cadena DSP: offloaded denoise o procesamiento inline.
                     scratch.resize(samples.len(), 0.0);
                     let info = ProcessingInfo {
                         sample_rate,
                         frames: samples.len(),
                     };
-                    chain.process(samples, &mut scratch, &info);
+
+                    if chain.has_denoise() && denoise_handle.is_some() {
+                        // --- Modo offloaded: denoise en hilo dedicado ---
+                        // a) Procesar módulos pre-denoise (HighPass, etc.).
+                        denoise_in_buf.resize(samples.len(), 0.0);
+                        chain.process_pre_denoise(samples, &mut denoise_in_buf, &info);
+
+                        // b) Enviar audio crudo al hilo de denoise.
+                        let _ = denoise_in_prod.push_slice(&denoise_in_buf);
+
+                        // c) Leer resultado denoiseado del ring de salida.
+                        denoise_out_buf.resize(samples.len(), 0.0);
+                        let n = denoise_out_cons.pop_slice(&mut denoise_out_buf);
+
+                        // d) Mezclar seco/húmedo y procesar módulos post-denoise.
+                        if n > 0 {
+                            let mix = denoise_shared.mix.load(Ordering::Relaxed);
+                            let dry = 1.0 - mix;
+                            for i in 0..n {
+                                denoise_out_buf[i] =
+                                    denoise_in_buf[i] * dry + denoise_out_buf[i] * mix;
+                            }
+                            chain.process_post_denoise(&denoise_out_buf[..n], &mut scratch, &info);
+                        } else {
+                            // Sin datos denoiseados aún: usar la señal pre-denoise
+                            // como fallback (degradación transparente).
+                            chain.process_post_denoise(&denoise_in_buf, &mut scratch, &info);
+                        }
+                    } else {
+                        // --- Modo inline: cadena completa (sin denoise ONNX). ---
+                        chain.process(samples, &mut scratch, &info);
+                    }
 
                     // 2) Encolar la señal procesada hacia la salida.
                     let pushed = producer.push_slice(&scratch);
@@ -613,19 +702,33 @@ fn heuristic_buffer_size(input_name: &str, output_name: &str) -> usize {
         return 1024;
     }
 
-    // Interfaces USB profesionales → buffer pequeño (baja latencia).
-    const LOW_LATENCY: &[&str] = &[
-        "usb",
-        "interface",
-        "scarlett",
-        "focusrite",
-        "steinberg",
-        "yamaha",
-        "presonus",
-        "rme",
-    ];
+    // Interfaces USB de gama alta → buffer pequeño (baja latencia).
+    const LOW_LATENCY: &[&str] = &["scarlett", "focusrite", "steinberg", "rme"];
     if LOW_LATENCY.iter().any(|kw| names.contains(kw)) {
         return 128;
+    }
+
+    // Interfaces USB de gama media/baja (Behringer, genéricas) → buffer
+    // moderado. Estas interfaces tienen mayor latencia USB inherente y
+    // necesitan más margen para evitar underruns con DSP activo.
+    const BUDGET_USB: &[&str] = &[
+        "behringer",
+        "umc",
+        "u-phoria",
+        "yamaha",
+        "presonus",
+        "arturia",
+        "maono",
+        "mtrack",
+        "xonar",
+    ];
+    if BUDGET_USB.iter().any(|kw| names.contains(kw)) {
+        return 512;
+    }
+
+    // Cualquier otro dispositivo USB no clasificado.
+    if names.contains("usb") || names.contains("interface") {
+        return 256;
     }
 
     // Predeterminado equilibrado para el resto (micrófonos integrados, etc.).
@@ -792,17 +895,67 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Construye el procesador de denoise para el hilo dedicado.
+///
+/// Prioriza ONNX DeepFilterNet3 si los modelos están disponibles;
+/// en caso contrario, usa RNNoise (puro Rust).
+fn build_denoise_processor(_sample_rate: u32, _max_frames: usize) -> Box<dyn AudioProcessor> {
+    #[cfg(feature = "onnx")]
+    {
+        if let Some(dir) = crate::models::models_dir() {
+            if crate::models::ModelStatus::check(&dir).available {
+                match crate::dsp::denoise_onnx::OnnxDenoise::new(dir) {
+                    Ok(processor) => return Box::new(processor),
+                    Err(e) => {
+                        log::warn!("ONNX denoise init failed for thread: {e}");
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(feature = "rnnoise")]
+    {
+        #[allow(clippy::needless_return)]
+        return Box::new(crate::dsp::RnnoiseDenoise::new());
+    }
+    #[cfg(not(any(feature = "onnx", feature = "rnnoise")))]
+    {
+        Box::new(crate::dsp::PassThroughProcessor::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn heuristic_prefers_small_buffer_for_usb_interfaces() {
+        // Interfaces de gama alta → 128 (latencia mínima).
+        assert_eq!(heuristic_buffer_size("Scarlett 2i2 USB", "Monitor 01"), 128);
         assert_eq!(
-            heuristic_buffer_size("Micrófono (USB Audio)", "Altavoces (USB Audio)"),
+            heuristic_buffer_size("Focusrite Scarlett Solo", "USB Audio"),
             128
         );
-        assert_eq!(heuristic_buffer_size("Scarlett 2i2 USB", "Monitor 01"), 128);
+        assert_eq!(heuristic_buffer_size("RME Babyface Pro", "USB Audio"), 128);
+    }
+
+    #[test]
+    fn heuristic_uses_moderate_buffer_for_budget_usb_interfaces() {
+        // Interfaces de gama media/baja → 512 (estabilidad con DSP activo).
+        assert_eq!(
+            heuristic_buffer_size("UMC22 USB Audio", "UMC22 USB Audio"),
+            512
+        );
+        assert_eq!(
+            heuristic_buffer_size("U-Phoria UMC22", "USB Audio Codec"),
+            512
+        );
+        assert_eq!(heuristic_buffer_size("BEHRINGER UMC 22", "USB Audio"), 512);
+        // USB genérico no clasificado → 256.
+        assert_eq!(
+            heuristic_buffer_size("Micrófono (USB Audio)", "Altavoces (USB Audio)"),
+            256
+        );
     }
 
     #[test]

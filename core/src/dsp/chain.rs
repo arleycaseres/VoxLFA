@@ -13,13 +13,14 @@ use std::sync::{mpsc, Arc, Mutex};
 #[cfg(feature = "rnnoise")]
 use crate::dsp::RnnoiseDenoise;
 use crate::dsp::{
-    AudioProcessor, BoomSuppressor, Compressor, DeEsser, Delay, FeedbackSuppressor, Gain, HighPass,
-    Limiter, NoiseGate, Notch, ParametricEq, ProcessResult, ProcessingInfo, Reverb, Saturator,
+    AudioProcessor, BoomSuppressor, Compressor, DeEsser, FeedbackSuppressor, Gain, HighPass,
+    Limiter, NoiseGate, Notch, ParametricEq, ProcessResult, ProcessingInfo, Saturator,
 };
 use crate::error::Error;
 use crate::protocol::{
-    DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent, EqBand,
-    FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams, PresetId,
+    DelayParams, DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent,
+    EqBand, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams, PresetId,
+    ReverbParams,
 };
 use crate::Result;
 
@@ -98,6 +99,10 @@ struct ChainLink {
     /// Parámetros actuales de corrección de tono si este eslabón es pitch
     /// correction; `None` si no.
     pitch_correction_params: Option<PitchCorrectionParams>,
+    /// Parámetros actuales de delay si este eslabón es delay; `None` si no.
+    delay_params: Option<DelayParams>,
+    /// Parámetros actuales de reverb si este eslabón es reverb; `None` si no.
+    reverb_params: Option<ReverbParams>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -112,6 +117,10 @@ pub struct ChainProcessor {
     max_frames: usize,
     scratch_a: Vec<f32>,
     scratch_b: Vec<f32>,
+    /// Índice del eslabón de denoise en la cadena, o `None` si no hay.
+    /// Se usa para dividir el procesamiento en pre/post-denoise cuando
+    /// la inferencia ONNX se ejecuta en un hilo dedicado.
+    denoise_idx: Option<usize>,
 }
 
 impl ChainProcessor {
@@ -129,6 +138,7 @@ impl ChainProcessor {
             max_frames,
             scratch_a: vec![0.0; max_frames],
             scratch_b: vec![0.0; max_frames],
+            denoise_idx: None,
         };
         chain.apply_preset(preset);
         chain
@@ -146,6 +156,8 @@ impl ChainProcessor {
                 let denoise_params = denoise_params_of(&spec.kind);
                 let feedback_params = feedback_params_of(&spec.kind);
                 let pitch_correction_params = pitch_correction_params_of(&spec.kind);
+                let delay_params = delay_params_of(&spec.kind);
+                let reverb_params = reverb_params_of(&spec.kind);
                 ChainLink {
                     name: module_name(&spec.kind),
                     enabled: spec.enabled,
@@ -156,9 +168,14 @@ impl ChainProcessor {
                     denoise_params,
                     feedback_params,
                     pitch_correction_params,
+                    delay_params,
+                    reverb_params,
                 }
             })
             .collect();
+        // Calcular el índice del eslabón de denoise para el procesamiento
+        // dividido (offloaded).
+        self.denoise_idx = self.links.iter().position(|l| l.name == "denoise");
     }
 
     /// Activa o desactiva el bypass de un módulo por su nombre.
@@ -280,6 +297,42 @@ impl ChainProcessor {
         }
     }
 
+    /// Reemplaza el procesador de delay por uno ya construido.
+    ///
+    /// Devuelve `true` si el módulo existe y se actualizó.
+    pub fn set_link_delay(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: DelayParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "delay") {
+            Some(link) => {
+                link.processor = processor;
+                link.delay_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Reemplaza el procesador de reverb por uno ya construido.
+    ///
+    /// Devuelve `true` si el módulo existe y se actualizó.
+    pub fn set_link_reverb(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: ReverbParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "reverb") {
+            Some(link) => {
+                link.processor = processor;
+                link.reverb_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -297,6 +350,8 @@ impl ChainProcessor {
                     denoise_params: link.denoise_params,
                     feedback_params: link.feedback_params,
                     pitch_correction_params: link.pitch_correction_params,
+                    delay_params: link.delay_params,
+                    reverb_params: link.reverb_params,
                 })
                 .collect(),
         }
@@ -351,6 +406,117 @@ impl AudioProcessor for ChainProcessor {
     fn reset(&mut self) {
         for link in &mut self.links {
             link.processor.reset();
+        }
+    }
+}
+
+impl ChainProcessor {
+    /// Devuelve `true` si la cadena tiene un eslabón de denoise.
+    pub fn has_denoise(&self) -> bool {
+        self.denoise_idx.is_some()
+    }
+
+    /// Procesa la cadena hasta el eslabón de denoise (excluyéndolo).
+    ///
+    /// Se usa cuando el denoise se ejecuta en un hilo dedicado: el callback
+    /// pasa los módulos pre-denoise (HighPass, FeedbackSuppressor) y obtiene
+    /// la señal lista para enviar al hilo de denoise.
+    ///
+    /// Si no hay eslabón de denoise o está en bypass global, se procesa toda
+    /// la cadena y el resultado se escribe en `output`.
+    pub fn process_pre_denoise(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        info: &ProcessingInfo,
+    ) -> ProcessResult {
+        let frames = input.len().min(output.len());
+
+        if frames > self.max_frames {
+            self.max_frames = frames;
+            self.scratch_a.resize(frames, 0.0);
+            self.scratch_b.resize(frames, 0.0);
+        }
+
+        let Some(denoise_idx) = self.denoise_idx else {
+            // Sin denoise: procesar toda la cadena.
+            return self.process(input, output, info);
+        };
+
+        self.scratch_a[..frames].copy_from_slice(&input[..frames]);
+
+        let mut total_latency = 0.0;
+        if !self.global_bypass {
+            for link in self.links[..denoise_idx].iter_mut() {
+                if !link.enabled || link.bypass {
+                    continue;
+                }
+                let result = link.processor.process(
+                    &self.scratch_a[..frames],
+                    &mut self.scratch_b[..frames],
+                    info,
+                );
+                total_latency += result.latency_ms;
+                std::mem::swap(&mut self.scratch_a, &mut self.scratch_b);
+            }
+        }
+
+        output[..frames].copy_from_slice(&self.scratch_a[..frames]);
+        ProcessResult {
+            latency_ms: total_latency,
+        }
+    }
+
+    /// Procesa la cadena desde después del eslabón de denoise hasta el final.
+    ///
+    /// Se invoca después de que el callback ha leído la señal denoised del ring
+    /// buffer del hilo de denoise. El `denoised` contiene la salida del denoise
+    /// (posiblemente con mezcla seco/húmedo ya aplicada por el callback).
+    ///
+    /// Si no hay eslabón de denoise, es un no-op (ya se procesó todo en
+    /// `process_pre_denoise`).
+    pub fn process_post_denoise(
+        &mut self,
+        denoised: &[f32],
+        output: &mut [f32],
+        info: &ProcessingInfo,
+    ) -> ProcessResult {
+        let Some(denoise_idx) = self.denoise_idx else {
+            // Sin denoise: ya se procesó todo.
+            let n = denoised.len().min(output.len());
+            output[..n].copy_from_slice(&denoised[..n]);
+            return ProcessResult { latency_ms: 0.0 };
+        };
+
+        let frames = denoised.len().min(output.len());
+
+        if frames > self.max_frames {
+            self.max_frames = frames;
+            self.scratch_a.resize(frames, 0.0);
+            self.scratch_b.resize(frames, 0.0);
+        }
+
+        self.scratch_a[..frames].copy_from_slice(&denoised[..frames]);
+
+        let mut total_latency = 0.0;
+        if !self.global_bypass {
+            for link in self.links[(denoise_idx + 1)..].iter_mut() {
+                if !link.enabled || link.bypass {
+                    continue;
+                }
+                let result = link.processor.process(
+                    &self.scratch_a[..frames],
+                    &mut self.scratch_b[..frames],
+                    info,
+                );
+                total_latency += result.latency_ms;
+                std::mem::swap(&mut self.scratch_a, &mut self.scratch_b);
+            }
+        }
+
+        output[..frames].copy_from_slice(&self.scratch_a[..frames]);
+        ProcessResult {
+            latency_ms: total_latency,
         }
     }
 }
@@ -411,6 +577,20 @@ pub enum DspCommand {
         /// Parámetros actuales de pitch correction para el estado de la cadena.
         params: PitchCorrectionParams,
     },
+    /// Reemplazar el procesador de delay (ajuste en vivo).
+    SetLinkDelay {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de delay para el estado de la cadena.
+        params: DelayParams,
+    },
+    /// Reemplazar el procesador de reverb (ajuste en vivo).
+    SetLinkReverb {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de reverb para el estado de la cadena.
+        params: ReverbParams,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -453,6 +633,8 @@ impl DspHandle {
                     denoise_params: denoise_params_of(&spec.kind),
                     feedback_params: feedback_params_of(&spec.kind),
                     pitch_correction_params: pitch_correction_params_of(&spec.kind),
+                    delay_params: delay_params_of(&spec.kind),
+                    reverb_params: reverb_params_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -664,6 +846,52 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Ajusta los parámetros del delay del preset activo en vivo.
+    ///
+    /// El nuevo `Delay` se construye aquí (hilo de control) con los parámetros
+    /// indicados y se envía ya listo al hilo de audio, que solo intercambia el
+    /// puntero. Devuelve error si el preset actual no tiene delay.
+    pub fn set_delay(&self, params: DelayParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "delay")
+            .ok_or_else(|| Error::audio("el preset actual no tiene delay"))?;
+        link.delay_params = Some(params);
+
+        let processor = super::delay::Delay::from_params(params, self.sample_rate);
+        self.send(DspCommand::SetLinkDelay {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
+    /// Ajusta los parámetros del reverb del preset activo en vivo.
+    ///
+    /// El nuevo `Reverb` se construye aquí (hilo de control) con los parámetros
+    /// indicados y se envía ya listo al hilo de audio, que solo intercambia el
+    /// puntero. Devuelve error si el preset actual no tiene reverb.
+    pub fn set_reverb(&self, params: ReverbParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "reverb")
+            .ok_or_else(|| Error::audio("el preset actual no tiene reverb"))?;
+        link.reverb_params = Some(params);
+
+        let processor = super::reverb::Reverb::from_params(params, self.sample_rate);
+        self.send(DspCommand::SetLinkReverb {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -778,6 +1006,60 @@ fn pitch_correction_params_of(kind: &DspModuleKind) -> Option<PitchCorrectionPar
     }
 }
 
+/// Parámetros de delay de una especificación de módulo, o `None` si no es delay.
+fn delay_params_of(kind: &DspModuleKind) -> Option<DelayParams> {
+    match kind {
+        DspModuleKind::Delay {
+            mode,
+            time_ms,
+            feedback,
+            mix,
+            pre_delay_ms,
+            low_cut_hz,
+            high_cut_hz,
+            tempo_bpm,
+            sync_enabled,
+            duck_amount,
+        } => Some(DelayParams {
+            mode: *mode,
+            time_ms: *time_ms,
+            feedback: *feedback,
+            mix: *mix,
+            pre_delay_ms: *pre_delay_ms,
+            low_cut_hz: *low_cut_hz,
+            high_cut_hz: *high_cut_hz,
+            tempo_bpm: *tempo_bpm,
+            sync_enabled: *sync_enabled,
+            duck_amount: *duck_amount,
+        }),
+        _ => None,
+    }
+}
+
+/// Parámetros de reverb de una especificación de módulo, o `None` si no es reverb.
+fn reverb_params_of(kind: &DspModuleKind) -> Option<ReverbParams> {
+    match kind {
+        DspModuleKind::Reverb {
+            mode,
+            room_size,
+            damping,
+            wet,
+            pre_delay_ms,
+            high_cut_hz,
+            low_cut_hz,
+        } => Some(ReverbParams {
+            mode: *mode,
+            room_size: *room_size,
+            damping: *damping,
+            wet: *wet,
+            pre_delay_ms: *pre_delay_ms,
+            high_cut_hz: *high_cut_hz,
+            low_cut_hz: *low_cut_hz,
+        }),
+        _ => None,
+    }
+}
+
 /// Construye el procesador real para una especificación de módulo.
 fn build_processor(
     spec: DspModuleSpec,
@@ -834,18 +1116,52 @@ fn build_processor(
         } => Box::new(DeEsser::new(threshold_db, freq_hz, amount, sample_rate)),
         DspModuleKind::Saturator { drive, mix } => Box::new(Saturator::new(drive, mix)),
         DspModuleKind::Delay {
+            mode,
             time_ms,
             feedback,
             mix,
-        } => Box::new(Delay::new(time_ms, feedback, mix, sample_rate)),
+            pre_delay_ms,
+            low_cut_hz,
+            high_cut_hz,
+            tempo_bpm,
+            sync_enabled,
+            duck_amount,
+        } => {
+            let _ = max_frames;
+            let params = DelayParams {
+                mode,
+                time_ms,
+                feedback,
+                mix,
+                pre_delay_ms,
+                low_cut_hz,
+                high_cut_hz,
+                tempo_bpm,
+                sync_enabled,
+                duck_amount,
+            };
+            Box::new(super::delay::Delay::from_params(params, sample_rate))
+        }
         DspModuleKind::Reverb {
+            mode,
             room_size,
             damping,
             wet,
+            pre_delay_ms,
+            high_cut_hz,
+            low_cut_hz,
         } => {
-            // `room_size` (0–1) → duración de la cola en ms (50–400).
-            let room_ms = 50.0 + room_size.clamp(0.0, 1.0) * 350.0;
-            Box::new(Reverb::new(room_ms, wet, damping, sample_rate))
+            let _ = max_frames;
+            let params = ReverbParams {
+                mode,
+                room_size,
+                damping,
+                wet,
+                pre_delay_ms,
+                high_cut_hz,
+                low_cut_hz,
+            };
+            Box::new(super::reverb::Reverb::from_params(params, sample_rate))
         }
         DspModuleKind::Limiter {
             threshold_db,

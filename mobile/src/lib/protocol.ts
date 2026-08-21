@@ -113,6 +113,37 @@ export interface FeedbackSuppressorParams {
   q: number;
 }
 
+/** Modo del delay. */
+export type DelayMode = "digital" | "analog" | "tape" | "slapback";
+
+/** Modo del reverb. */
+export type ReverbMode = "plate" | "hall" | "room";
+
+/** Parámetros de delay. */
+export interface DelayParams {
+  mode: DelayMode;
+  timeMs: number;
+  feedback: number;
+  mix: number;
+  preDelayMs: number;
+  lowCutHz: number;
+  highCutHz: number;
+  tempoBpm: number;
+  syncEnabled: boolean;
+  duckAmount: number;
+}
+
+/** Parámetros de reverb. */
+export interface ReverbParams {
+  mode: ReverbMode;
+  roomSize: number;
+  damping: number;
+  wet: number;
+  preDelayMs: number;
+  highCutHz: number;
+  lowCutHz: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -128,6 +159,10 @@ export interface DspLinkState {
   feedbackParams: FeedbackSuppressorParams | null;
   /** Parámetros de pitch correction si este módulo es pitch correction; si no, `null`. */
   pitchCorrectionParams: PitchCorrectionParams | null;
+  /** Parámetros de delay si este módulo es delay; si no, `null`. */
+  delayParams: DelayParams | null;
+  /** Parámetros de reverb si este módulo es reverb; si no, `null`. */
+  reverbParams: ReverbParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -171,7 +206,9 @@ export type SuggestionAction =
   | { type: "setDenoise"; mix: number }
   | { type: "setFeedback"; thresholdDb: number; q: number }
   | { type: "setPitchCorrection"; strength: number; mix: number }
-  | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number };
+  | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number }
+  | { type: "setDelay"; timeMs: number; mix: number }
+  | { type: "setReverb"; wet: number; roomSize: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {
@@ -218,7 +255,9 @@ export type ControlCommand =
   | { type: "setNoiseGate"; params: NoiseGateParams }
   | { type: "setDenoise"; params: DenoiseParams }
   | { type: "setFeedback"; params: FeedbackSuppressorParams }
-  | { type: "setPitchCorrection"; params: PitchCorrectionParams };
+  | { type: "setPitchCorrection"; params: PitchCorrectionParams }
+  | { type: "setDelay"; params: DelayParams }
+  | { type: "setReverb"; params: ReverbParams };
 
 /**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).

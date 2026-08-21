@@ -10,6 +10,7 @@ import * as mock from "./mock";
 import type {
   AnalysisSample,
   AppConfig,
+  DelayParams,
   DenoiseParams,
   DeviceList,
   DspState,
@@ -23,6 +24,7 @@ import type {
   PitchCorrectionParams,
   PresetId,
   PresetInfo,
+  ReverbParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -178,6 +180,16 @@ export function setFeedback(params: FeedbackSuppressorParams): Promise<void> {
 /** Ajusta los parámetros de corrección de tono en vivo. */
 export function setPitchCorrection(params: PitchCorrectionParams): Promise<void> {
   return inTauri() ? invoke<void>("set_pitch_correction", { params }) : mock.setPitchCorrection(params);
+}
+
+/** Ajusta los parámetros del delay en vivo. */
+export function setDelay(params: DelayParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_delay", { params }) : mock.setDelay(params);
+}
+
+/** Ajusta los parámetros del reverb en vivo. */
+export function setReverb(params: ReverbParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_reverb", { params }) : mock.setReverb(params);
 }
 
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */

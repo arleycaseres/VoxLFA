@@ -468,6 +468,32 @@ impl EngineManager {
         Ok(())
     }
 
+    /// Ajusta los parámetros del delay del preset activo en vivo.
+    pub fn set_delay(
+        &mut self,
+        params: voxlfa_core::protocol::DelayParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_delay(params)?;
+        self.update_current_profile(|profile| {
+            profile.delay_params = Some(params);
+        });
+        Ok(())
+    }
+
+    /// Ajusta los parámetros del reverb del preset activo en vivo.
+    pub fn set_reverb(
+        &mut self,
+        params: voxlfa_core::protocol::ReverbParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_reverb(params)?;
+        self.update_current_profile(|profile| {
+            profile.reverb_params = Some(params);
+        });
+        Ok(())
+    }
+
     /// Aplica un cambio al perfil del dispositivo en uso, si el motor corre.
     fn update_current_profile(
         &mut self,

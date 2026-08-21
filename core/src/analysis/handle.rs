@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use crate::dsp::DspHandle;
 use crate::error::Error;
 use crate::protocol::{
-    AnalysisSample, DenoiseParams, FeedbackSuppressorParams, PitchCorrectionParams, SessionSummary,
-    SuggestionAction,
+    AnalysisSample, DelayParams, DenoiseParams, FeedbackSuppressorParams, PitchCorrectionParams,
+    ReverbParams, SessionSummary, SuggestionAction,
 };
 use crate::Result;
 
@@ -104,6 +104,27 @@ impl AnalysisHandle {
                 release_ms: 100.0,
                 hold_ms: 25.0,
                 range_db: *range_db,
+            }),
+            SuggestionAction::SetDelay { time_ms, mix } => self.dsp.set_delay(DelayParams {
+                mode: crate::protocol::DelayMode::Digital,
+                time_ms: *time_ms,
+                feedback: 0.35,
+                mix: *mix,
+                pre_delay_ms: 0.0,
+                low_cut_hz: 100.0,
+                high_cut_hz: 8000.0,
+                tempo_bpm: 120.0,
+                sync_enabled: false,
+                duck_amount: 0.0,
+            }),
+            SuggestionAction::SetReverb { wet, room_size } => self.dsp.set_reverb(ReverbParams {
+                mode: crate::protocol::ReverbMode::Plate,
+                room_size: *room_size,
+                damping: 0.3,
+                wet: *wet,
+                pre_delay_ms: 15.0,
+                high_cut_hz: 8000.0,
+                low_cut_hz: 200.0,
             }),
         }
     }

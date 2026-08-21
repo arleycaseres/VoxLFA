@@ -67,19 +67,26 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
     abierta/cerrada con *hold* y ganancia suavizada en dB (sin *zipper noise*).
     Arranca cerrada y no asigna memoria en el callback. Va tras el pasa-altos en
     los presets de voz.
-  - **Tiempo/color**: `Saturator` (tanh), `Delay` (feedback, mezcla),
-    `Reverb` (Schroeder: 4 comb + 2 allpass), `Gain`, `PassThroughProcessor`.
+  - **Tiempo/color**: `Saturator` (tanh), `Delay` (multi-modo: Digital, Analog,
+    Tape, Slapback; con pre-delay, filtros HP/LP en wet, ducking con envelope
+    follower), `Reverb` (multi-modo: Plate, Hall, Room; con pre-delay, filtros
+    HP/LP en return, `ReverbTopology` por modo), `Gain`,
+    `PassThroughProcessor`.
   - **Cadena**: `ChainProcessor` encadena módulos en orden, mide latencia
     acumulada y aplica bypass por módulo o global; `DspHandle` permite
     reconfigurar en vivo (`DspCommand`: aplicar preset, bypass global, bypass
-    de módulo y reemplazo de un módulo completo) conmutando cadenas o
-    procesadores preconstruidos en un hilo de control. El **ajuste fino del
-    EQ** (`DspHandle::set_eq_band`) reconstruye solo el `ParametricEq` con la
-    banda modificada y lo conmuta por puntero; las bandas actuales viajan en
-    el estado (`DspLinkState::eq_bands`). La **puerta de ruido** se ajusta igual
-    (`DspHandle::set_noise_gate`): reconstruye el `NoiseGate` en el hilo de
-    control y lo conmuta por puntero; los parámetros viajan en
-    `DspLinkState::gate_params`.
+    de módulo, reemplazo de módulo completo, `SetLinkDelay`, `SetLinkReverb`)
+    conmutando cadenas o procesadores preconstruidos en un hilo de control. El
+    **ajuste fino del EQ** (`DspHandle::set_eq_band`) reconstruye solo el
+    `ParametricEq` con la banda modificada y lo conmuta por puntero; las bandas
+    actuales viajan en el estado (`DspLinkState::eq_bands`). La **puerta de
+    ruido** se ajusta igual (`DspHandle::set_noise_gate`): reconstruye el
+    `NoiseGate` en el hilo de control y lo conmuta por puntero; los parámetros
+    viajan en `DspLinkState::gate_params`. El **delay** y **reverb** multi-modo
+    se ajustan con `DspHandle::set_delay()`/`set_reverb()`: reconstruyen el
+    procesador completo (cambia modo, tiempo, feedback, etc.) y lo conmutan por
+    puntero; los parámetros viajan en `DspLinkState::delay_params` y
+    `DspLinkState::reverb_params`.
 - `dsp::presets::PresetFactory`: `vozLimpia`, `radio` y `warm` (todas terminan
   en un limiter de seguridad e incluyen antifeedback: pasa-altos + muesca y/o
   supresión de *boominess*).
@@ -136,9 +143,9 @@ Cáscara de escritorio que orquesta el core:
   ambiguos (`0/O`, `1/I/l`).
 - `src-tauri/src/tauri_app.rs` (feature `webview`): comandos expuestos a la UI,
   incluidos `apply_preset`, `set_global_bypass`, `set_link_bypass`,
-  `set_eq_band` y `set_noise_gate`, que reconfiguran la cadena DSP en vivo vía
-  `EngineManager`, y los de análisis: `get_analysis`, `get_session_summary` y
-  `apply_suggestion`.
+  `set_eq_band`, `set_noise_gate`, `set_delay` y `set_reverb`, que
+  reconfiguran la cadena DSP en vivo vía `EngineManager`, y los de análisis:
+  `get_analysis`, `get_session_summary` y `apply_suggestion`.
 
 La UI (React/TS) accede a Tauri **solo** a través de `src/lib/tauri.ts`; el
 estado se consume con el hook `useEngine` (que también replica la cabina con un
@@ -187,13 +194,14 @@ el escritorio ejecuta contra el motor; el resultado vuelve como evento `dsp`.
 
 La cadena no se toca desde el hilo de audio:
 
-1. La UI llama `apply_preset`/`set_*_bypass`/`set_eq_band`/`set_noise_gate` →
-   `DspCommand` por canal mpsc.
-2. El hilo de control de `DspHandle` construye la cadena (o el módulo EQ/gate)
-   nueva —aquí sí se puede asignar memoria— y la intercambia atómicamente con
-   la activa. Para el ajuste fino solo se reemplaza el procesador del eslabón
-   `eq` o `noisegate` (`SetLinkProcessor`/`SetLinkGate`), sin reconstruir
-   reverb/delay ni perder su estado.
+1. La UI llama `apply_preset`/`set_*_bypass`/`set_eq_band`/`set_noise_gate`/
+   `set_delay`/`set_reverb` → `DspCommand` por canal mpsc.
+2. El hilo de control de `DspHandle` construye la cadena (o el módulo EQ/gate/
+   delay/reverb) nueva —aquí sí se puede asignar memoria— y la intercambia
+   atómicamente con la activa. Para el ajuste fino solo se reemplaza el
+   procesador del eslabón `eq` o `noisegate` (`SetLinkProcessor`/`SetLinkGate`),
+   sin reconstruir delay/reverb ni perder su estado. Para delay/reverb se
+   reconstruye el procesador completo (`SetLinkDelay`/`SetLinkReverb`).
 3. El callback de audio solo ve el puntero nuevo en la siguiente iteración;
    actualiza `Arc<Mutex<DspState>>` y emite `EngineEvent::Dsp`.
 

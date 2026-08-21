@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   AnalysisSample,
   AppConfig,
+  DelayParams,
   DenoiseParams,
   DeviceList,
   DspState,
@@ -19,6 +20,7 @@ import type {
   PitchCorrectionParams,
   PresetId,
   PresetInfo,
+  ReverbParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -49,6 +51,8 @@ import {
   setLinkBypass,
   setNoiseGate,
   setPitchCorrection,
+  setDelay,
+  setReverb,
   setTelemetryConsent,
   startEngine,
   stopEngine,
@@ -115,6 +119,10 @@ export interface EngineController {
   setFeedback: (params: FeedbackSuppressorParams) => Promise<void>;
   /** Ajusta los parámetros de corrección de tono del preset activo en vivo. */
   setPitchCorrection: (params: PitchCorrectionParams) => Promise<void>;
+  /** Ajusta los parámetros de delay del preset activo en vivo. */
+  setDelay: (params: DelayParams) => Promise<void>;
+  /** Ajusta los parámetros de reverb del preset activo en vivo. */
+  setReverb: (params: ReverbParams) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
@@ -263,6 +271,22 @@ export function useEngine(): EngineController {
   const setPitchCorrectionAction = useCallback(async (params: PitchCorrectionParams) => {
     try {
       await setPitchCorrection(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setDelayAction = useCallback(async (params: DelayParams) => {
+    try {
+      await setDelay(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setReverbAction = useCallback(async (params: ReverbParams) => {
+    try {
+      await setReverb(params);
     } catch (err) {
       setError(String(err));
     }
@@ -443,6 +467,8 @@ export function useEngine(): EngineController {
     setDenoise: setDenoiseAction,
     setFeedback: setFeedbackAction,
     setPitchCorrection: setPitchCorrectionAction,
+    setDelay: setDelayAction,
+    setReverb: setReverbAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
     setTelemetryConsent: setTelemetryConsentAction,

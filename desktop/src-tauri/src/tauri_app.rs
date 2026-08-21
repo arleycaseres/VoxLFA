@@ -342,6 +342,26 @@ fn set_pitch_correction(
         .map_err(|err| err.to_string())
 }
 
+/// Ajusta los parámetros del delay del preset activo en vivo.
+#[tauri::command]
+fn set_delay(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::DelayParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.set_delay(params).map_err(|err| err.to_string())
+}
+
+/// Ajusta los parámetros del reverb del preset activo en vivo.
+#[tauri::command]
+fn set_reverb(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::ReverbParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.set_reverb(params).map_err(|err| err.to_string())
+}
+
 /// Pide sugerencias al asesor de IA (Groq) con las métricas actuales.
 ///
 /// Ejecuta la petición HTTP en un hilo bloqueante para no bloquear la UI.
@@ -508,6 +528,8 @@ pub fn run() {
             set_denoise,
             set_feedback,
             set_pitch_correction,
+            set_delay,
+            set_reverb,
             request_ai_suggestions,
             get_ai_suggestions,
             get_config,

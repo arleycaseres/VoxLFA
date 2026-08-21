@@ -94,6 +94,20 @@ pub enum SuggestionAction {
         /// Atenuación máxima al cerrar (dB).
         range_db: f32,
     },
+    /// Ajustar los parámetros del delay.
+    SetDelay {
+        /// Tiempo del eco en ms.
+        time_ms: f32,
+        /// Mezcla seco/húmedo (0–1).
+        mix: f32,
+    },
+    /// Ajustar los parámetros del reverb.
+    SetReverb {
+        /// Mezcla seco/húmedo (0–1).
+        wet: f32,
+        /// Tamaño de la sala (0–1).
+        room_size: f32,
+    },
 }
 
 /// Sugerencia generada por el motor de análisis para la voz actual.

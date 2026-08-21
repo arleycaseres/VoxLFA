@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
-    DenoiseParams, EqBand, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams,
-    PresetId,
+    DelayParams, DenoiseParams, EqBand, FeedbackSuppressorParams, NoiseGateParams,
+    PitchCorrectionParams, PresetId, ReverbParams,
 };
 use crate::Result;
 
@@ -83,6 +83,14 @@ pub struct DeviceProfile {
     /// y se ajustaron en vivo; `None` = usar los del preset.
     #[serde(default)]
     pub pitch_correction_params: Option<PitchCorrectionParams>,
+    /// Parámetros de delay si el preset de este perfil lo tiene y se ajustaron
+    /// en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub delay_params: Option<DelayParams>,
+    /// Parámetros de reverb si el preset de este perfil lo tiene y se ajustaron
+    /// en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub reverb_params: Option<ReverbParams>,
     /// `true` si el bypass global estaba activo al guardar.
     #[serde(default)]
     pub global_bypass: bool,
@@ -116,6 +124,8 @@ impl AppConfig {
             denoise_params: None,
             feedback_params: None,
             pitch_correction_params: None,
+            delay_params: None,
+            reverb_params: None,
             global_bypass: false,
             link_bypass: HashMap::new(),
         });

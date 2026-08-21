@@ -261,6 +261,8 @@ fn engine_event_dsp_serializes_with_type_tag() {
             denoise_params: None,
             feedback_params: None,
             pitch_correction_params: None,
+            delay_params: None,
+            reverb_params: None,
         }],
     });
 
