@@ -22,6 +22,7 @@ import { FeedbackPanel } from "./components/FeedbackPanel";
 import { PitchCorrectionPanel } from "./components/PitchCorrectionPanel";
 import { DelayPanel } from "./components/DelayPanel";
 import { ReverbPanel } from "./components/ReverbPanel";
+import { SaturatorPanel } from "./components/SaturatorPanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
 import { FloatingSuggestion } from "./components/FloatingSuggestion";
 import { SpectrumView } from "./components/SpectrumView";
@@ -326,6 +327,13 @@ export default function App() {
             dsp={engine.dsp}
             running={running}
             onSetReverb={(params) => void engine.setReverb(params)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Saturación</h2>
+          <SaturatorPanel
+            dsp={engine.dsp}
+            running={running}
+            onSetSaturator={(params) => void engine.setSaturator(params)}
           />
 
           {engine.error && <p className="controls__error">{engine.error}</p>}

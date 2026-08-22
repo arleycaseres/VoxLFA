@@ -494,6 +494,18 @@ impl EngineManager {
         Ok(())
     }
 
+    pub fn set_saturator(
+        &mut self,
+        params: voxlfa_core::protocol::SaturatorParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_saturator(params)?;
+        self.update_current_profile(|profile| {
+            profile.saturator_params = Some(params);
+        });
+        Ok(())
+    }
+
     /// Aplica un cambio al perfil del dispositivo en uso, si el motor corre.
     fn update_current_profile(
         &mut self,

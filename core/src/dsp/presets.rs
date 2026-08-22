@@ -5,7 +5,7 @@
 
 use crate::protocol::{
     DelayMode, DspModuleKind, DspModuleSpec, EqBand, EqBandKind, NoiseGateParams, PresetId,
-    PresetInfo, ReverbMode,
+    PresetInfo, ReverbMode, SaturatorMode,
 };
 
 /// Fábrica de presets: devuelve la especificación de cadena de cada uno.
@@ -189,6 +189,7 @@ fn radio() -> Vec<DspModuleSpec> {
             ],
         }),
         module(DspModuleKind::Saturator {
+            mode: SaturatorMode::Tube,
             drive: 3.0,
             mix: 0.4,
         }),

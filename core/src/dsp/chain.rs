@@ -20,7 +20,7 @@ use crate::error::Error;
 use crate::protocol::{
     DelayParams, DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent,
     EqBand, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams, PresetId,
-    ReverbParams,
+    ReverbParams, SaturatorParams,
 };
 use crate::Result;
 
@@ -103,6 +103,8 @@ struct ChainLink {
     delay_params: Option<DelayParams>,
     /// Parámetros actuales de reverb si este eslabón es reverb; `None` si no.
     reverb_params: Option<ReverbParams>,
+    /// Parámetros actuales de saturación si este eslabón es saturator; `None` si no.
+    saturator_params: Option<SaturatorParams>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -158,6 +160,7 @@ impl ChainProcessor {
                 let pitch_correction_params = pitch_correction_params_of(&spec.kind);
                 let delay_params = delay_params_of(&spec.kind);
                 let reverb_params = reverb_params_of(&spec.kind);
+                let saturator_params = saturator_params_of(&spec.kind);
                 ChainLink {
                     name: module_name(&spec.kind),
                     enabled: spec.enabled,
@@ -170,6 +173,7 @@ impl ChainProcessor {
                     pitch_correction_params,
                     delay_params,
                     reverb_params,
+                    saturator_params,
                 }
             })
             .collect();
@@ -333,6 +337,22 @@ impl ChainProcessor {
         }
     }
 
+    /// Reemplaza el procesador de saturación de un eslabón (ajuste en vivo).
+    pub fn set_link_saturator(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: SaturatorParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "saturator") {
+            Some(link) => {
+                link.processor = processor;
+                link.saturator_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -352,6 +372,7 @@ impl ChainProcessor {
                     pitch_correction_params: link.pitch_correction_params,
                     delay_params: link.delay_params,
                     reverb_params: link.reverb_params,
+                    saturator_params: link.saturator_params,
                 })
                 .collect(),
         }
@@ -591,6 +612,13 @@ pub enum DspCommand {
         /// Parámetros actuales de reverb para el estado de la cadena.
         params: ReverbParams,
     },
+    /// Reemplazar el procesador de saturación (ajuste en vivo).
+    SetLinkSaturator {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de saturación para el estado de la cadena.
+        params: SaturatorParams,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -635,6 +663,7 @@ impl DspHandle {
                     pitch_correction_params: pitch_correction_params_of(&spec.kind),
                     delay_params: delay_params_of(&spec.kind),
                     reverb_params: reverb_params_of(&spec.kind),
+                    saturator_params: saturator_params_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -892,6 +921,30 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Ajusta los parámetros de saturación en vivo.
+    pub fn set_saturator(&self, params: SaturatorParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "saturator")
+            .ok_or_else(|| Error::audio("el preset actual no tiene saturación"))?;
+        link.saturator_params = Some(params);
+
+        let processor = super::saturator::Saturator::from_params(
+            params.mode,
+            params.drive,
+            params.mix,
+            self.sample_rate,
+        );
+        self.send(DspCommand::SetLinkSaturator {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -1060,6 +1113,17 @@ fn reverb_params_of(kind: &DspModuleKind) -> Option<ReverbParams> {
     }
 }
 
+fn saturator_params_of(kind: &DspModuleKind) -> Option<SaturatorParams> {
+    match kind {
+        DspModuleKind::Saturator { mode, drive, mix } => Some(SaturatorParams {
+            mode: *mode,
+            drive: *drive,
+            mix: *mix,
+        }),
+        _ => None,
+    }
+}
+
 /// Construye el procesador real para una especificación de módulo.
 fn build_processor(
     spec: DspModuleSpec,
@@ -1114,7 +1178,9 @@ fn build_processor(
             freq_hz,
             amount,
         } => Box::new(DeEsser::new(threshold_db, freq_hz, amount, sample_rate)),
-        DspModuleKind::Saturator { drive, mix } => Box::new(Saturator::new(drive, mix)),
+        DspModuleKind::Saturator { mode, drive, mix } => {
+            Box::new(Saturator::from_params(mode, drive, mix, sample_rate))
+        }
         DspModuleKind::Delay {
             mode,
             time_ms,

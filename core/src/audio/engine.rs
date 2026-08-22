@@ -428,6 +428,9 @@ impl AudioEngine {
                             DspCommand::SetLinkReverb { processor, params } => {
                                 chain.set_link_reverb(processor, params);
                             }
+                            DspCommand::SetLinkSaturator { processor, params } => {
+                                chain.set_link_saturator(processor, params);
+                            }
                         }
                     }
 

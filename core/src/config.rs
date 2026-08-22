@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
     DelayParams, DenoiseParams, EqBand, FeedbackSuppressorParams, NoiseGateParams,
-    PitchCorrectionParams, PresetId, ReverbParams,
+    PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams,
 };
 use crate::Result;
 
@@ -91,6 +91,10 @@ pub struct DeviceProfile {
     /// en vivo; `None` = usar los del preset.
     #[serde(default)]
     pub reverb_params: Option<ReverbParams>,
+    /// Parámetros de saturación si el preset de este perfil lo tiene y se
+    /// ajustaron en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub saturator_params: Option<SaturatorParams>,
     /// `true` si el bypass global estaba activo al guardar.
     #[serde(default)]
     pub global_bypass: bool,
@@ -126,6 +130,7 @@ impl AppConfig {
             pitch_correction_params: None,
             delay_params: None,
             reverb_params: None,
+            saturator_params: None,
             global_bypass: false,
             link_bypass: HashMap::new(),
         });

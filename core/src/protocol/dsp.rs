@@ -109,6 +109,30 @@ pub struct FeedbackSuppressorParams {
     pub q: f32,
 }
 
+/// Modo de saturación (tipo de distorsión armónica).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SaturatorMode {
+    /// Tubo: saturación suave, armónicos pares dominantes (calidez musical).
+    Tube,
+    /// Cinta: saturación con compresión suave y rolloff de agudos (vintage).
+    Tape,
+    /// Tubo + Cinta: dos etapas en cascada para un carácter más rico.
+    TubeTape,
+}
+
+/// Parámetros de saturación (espejo de `DspModuleKind::Saturator`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaturatorParams {
+    /// Modo de saturación.
+    pub mode: SaturatorMode,
+    /// Ganancia previa al clipping (0 = lineal, > 0 = distorsión).
+    pub drive: f32,
+    /// Mezcla seco/húmedo (0 = seco, 1 = saturado).
+    pub mix: f32,
+}
+
 /// Modo del delay (tipo de carácter del eco).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -346,6 +370,8 @@ pub enum DspModuleKind {
     },
     /// Saturación / armónicos suaves.
     Saturator {
+        /// Modo de saturación.
+        mode: SaturatorMode,
         /// Cantidad de "drive" (distorsión) pre-clipping.
         drive: f32,
         /// Mezcla seco/húmedo (0 = seco, 1 = saturado).
@@ -467,6 +493,9 @@ pub struct DspLinkState {
     /// Parámetros actuales de reverb si este módulo es reverb; `None` en los
     /// demás. Refleja los ajustes en vivo con `set_reverb`.
     pub reverb_params: Option<ReverbParams>,
+    /// Parámetros actuales de saturación si este módulo es saturator; `None` en
+    /// los demás. Refleja los ajustes en vivo con `set_saturator`.
+    pub saturator_params: Option<SaturatorParams>,
 }
 
 /// Estado completo de la cadena DSP activa.

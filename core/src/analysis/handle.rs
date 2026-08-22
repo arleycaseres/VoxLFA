@@ -11,7 +11,7 @@ use crate::dsp::DspHandle;
 use crate::error::Error;
 use crate::protocol::{
     AnalysisSample, DelayParams, DenoiseParams, FeedbackSuppressorParams, PitchCorrectionParams,
-    ReverbParams, SessionSummary, SuggestionAction,
+    ReverbParams, SaturatorParams, SessionSummary, SuggestionAction,
 };
 use crate::Result;
 
@@ -126,6 +126,13 @@ impl AnalysisHandle {
                 high_cut_hz: 8000.0,
                 low_cut_hz: 200.0,
             }),
+            SuggestionAction::SetSaturator { drive, mix } => {
+                self.dsp.set_saturator(SaturatorParams {
+                    mode: crate::protocol::SaturatorMode::Tube,
+                    drive: *drive,
+                    mix: *mix,
+                })
+            }
         }
     }
 }

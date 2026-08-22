@@ -144,6 +144,16 @@ export interface ReverbParams {
   lowCutHz: number;
 }
 
+/** Modo de saturación. */
+export type SaturatorMode = "tube" | "tape" | "tubeTape";
+
+/** Parámetros de saturación. */
+export interface SaturatorParams {
+  mode: SaturatorMode;
+  drive: number;
+  mix: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -163,6 +173,8 @@ export interface DspLinkState {
   delayParams: DelayParams | null;
   /** Parámetros de reverb si este módulo es reverb; si no, `null`. */
   reverbParams: ReverbParams | null;
+  /** Parámetros de saturación si este módulo es saturator; si no, `null`. */
+  saturatorParams: SaturatorParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -208,7 +220,8 @@ export type SuggestionAction =
   | { type: "setPitchCorrection"; strength: number; mix: number }
   | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number }
   | { type: "setDelay"; timeMs: number; mix: number }
-  | { type: "setReverb"; wet: number; roomSize: number };
+  | { type: "setReverb"; wet: number; roomSize: number }
+  | { type: "setSaturator"; drive: number; mix: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {
@@ -257,7 +270,8 @@ export type ControlCommand =
   | { type: "setFeedback"; params: FeedbackSuppressorParams }
   | { type: "setPitchCorrection"; params: PitchCorrectionParams }
   | { type: "setDelay"; params: DelayParams }
-  | { type: "setReverb"; params: ReverbParams };
+  | { type: "setReverb"; params: ReverbParams }
+  | { type: "setSaturator"; params: SaturatorParams };
 
 /**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).

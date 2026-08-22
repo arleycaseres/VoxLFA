@@ -285,6 +285,9 @@ fn execute_command(engine: &mut EngineManager, command: ControlCommand) -> Resul
         ControlCommand::SetReverb { params } => {
             engine.set_reverb(params).map_err(|err| err.to_string())
         }
+        ControlCommand::SetSaturator { params } => {
+            engine.set_saturator(params).map_err(|err| err.to_string())
+        }
     }
 }
 

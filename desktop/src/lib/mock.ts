@@ -27,6 +27,7 @@ import type {
   PresetId,
   PresetInfo,
   ReverbParams,
+  SaturatorParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -238,6 +239,7 @@ function buildDspState(preset: PresetId): DspState {
     pitchCorrectionParams: null,
     delayParams: null,
     reverbParams: null,
+    saturatorParams: null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -694,6 +696,19 @@ export function setReverb(params: ReverbParams): Promise<void> {
     links: dspState.links.map((item) =>
       item.name === "reverb"
         ? { ...item, reverbParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setSaturator(params: SaturatorParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "saturator"
+        ? { ...item, saturatorParams: params }
         : item,
     ),
   };

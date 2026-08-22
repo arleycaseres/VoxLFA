@@ -108,6 +108,13 @@ pub enum SuggestionAction {
         /// Tamaño de la sala (0–1).
         room_size: f32,
     },
+    /// Ajustar los parámetros de saturación.
+    SetSaturator {
+        /// Ganancia previa al clipping (0–16).
+        drive: f32,
+        /// Mezcla seco/húmedo (0–1).
+        mix: f32,
+    },
 }
 
 /// Sugerencia generada por el motor de análisis para la voz actual.

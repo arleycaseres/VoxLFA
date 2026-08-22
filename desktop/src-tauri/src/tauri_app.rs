@@ -362,6 +362,16 @@ fn set_reverb(
     engine.set_reverb(params).map_err(|err| err.to_string())
 }
 
+/// Ajusta los parámetros de saturación del preset activo en vivo.
+#[tauri::command]
+fn set_saturator(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::SaturatorParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.set_saturator(params).map_err(|err| err.to_string())
+}
+
 /// Pide sugerencias al asesor de IA (Groq) con las métricas actuales.
 ///
 /// Ejecuta la petición HTTP en un hilo bloqueante para no bloquear la UI.
@@ -530,6 +540,7 @@ pub fn run() {
             set_pitch_correction,
             set_delay,
             set_reverb,
+            set_saturator,
             request_ai_suggestions,
             get_ai_suggestions,
             get_config,

@@ -73,6 +73,24 @@ export function getActionTarget(action: AnyAction): ActionTarget | null {
         control: "Umbral / Rango",
         detail: `${(action as any).thresholdDb} dB, rango ${(action as any).rangeDb} dB`,
       };
+    case "setDelay":
+      return {
+        panel: "Delay",
+        control: "Tiempo / Mezcla",
+        detail: `${(action as any).timeMs} ms, ${Math.round((action as any).mix * 100)}%`,
+      };
+    case "setReverb":
+      return {
+        panel: "Reverb",
+        control: "Mezcla / Tamaño",
+        detail: `${Math.round((action as any).wet * 100)}%, tamaño ${Math.round((action as any).roomSize * 100)}%`,
+      };
+    case "setSaturator":
+      return {
+        panel: "Saturación",
+        control: "Drive / Mezcla",
+        detail: `${(action as any).drive}, ${Math.round((action as any).mix * 100)}%`,
+      };
   }
 
   return null;

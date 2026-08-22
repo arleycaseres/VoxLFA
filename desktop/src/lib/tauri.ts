@@ -25,6 +25,7 @@ import type {
   PresetId,
   PresetInfo,
   ReverbParams,
+  SaturatorParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -190,6 +191,11 @@ export function setDelay(params: DelayParams): Promise<void> {
 /** Ajusta los parámetros del reverb en vivo. */
 export function setReverb(params: ReverbParams): Promise<void> {
   return inTauri() ? invoke<void>("set_reverb", { params }) : mock.setReverb(params);
+}
+
+/** Ajusta los parámetros de saturación en vivo. */
+export function setSaturator(params: SaturatorParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_saturator", { params }) : mock.setSaturator(params);
 }
 
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */

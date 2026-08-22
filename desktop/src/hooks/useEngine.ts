@@ -21,6 +21,7 @@ import type {
   PresetId,
   PresetInfo,
   ReverbParams,
+  SaturatorParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -53,6 +54,7 @@ import {
   setPitchCorrection,
   setDelay,
   setReverb,
+  setSaturator,
   setTelemetryConsent,
   startEngine,
   stopEngine,
@@ -123,6 +125,8 @@ export interface EngineController {
   setDelay: (params: DelayParams) => Promise<void>;
   /** Ajusta los parámetros de reverb del preset activo en vivo. */
   setReverb: (params: ReverbParams) => Promise<void>;
+  /** Ajusta los parámetros de saturación del preset activo en vivo. */
+  setSaturator: (params: SaturatorParams) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
@@ -287,6 +291,14 @@ export function useEngine(): EngineController {
   const setReverbAction = useCallback(async (params: ReverbParams) => {
     try {
       await setReverb(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setSaturatorAction = useCallback(async (params: SaturatorParams) => {
+    try {
+      await setSaturator(params);
     } catch (err) {
       setError(String(err));
     }
@@ -469,6 +481,7 @@ export function useEngine(): EngineController {
     setPitchCorrection: setPitchCorrectionAction,
     setDelay: setDelayAction,
     setReverb: setReverbAction,
+    setSaturator: setSaturatorAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
     setTelemetryConsent: setTelemetryConsentAction,

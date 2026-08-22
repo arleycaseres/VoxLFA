@@ -223,6 +223,19 @@ export interface ReverbParams {
   lowCutHz: number;
 }
 
+/** Modo de saturación (tipo de distorsión armónica). */
+export type SaturatorMode = "tube" | "tape" | "tubeTape";
+
+/** Parámetros de saturación (espejo de `core/src/protocol/dsp.rs`). */
+export interface SaturatorParams {
+  /** Modo de saturación. */
+  mode: SaturatorMode;
+  /** Ganancia previa al clipping (0 = lineal, > 0 = distorsión). */
+  drive: number;
+  /** Mezcla seco/húmedo (0 = seco, 1 = saturado). */
+  mix: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   /** Nombre corto del módulo (identificador para el bypass). */
@@ -245,6 +258,8 @@ export interface DspLinkState {
   delayParams: DelayParams | null;
   /** Parámetros de reverb si este módulo es reverb; si no, `null`. */
   reverbParams: ReverbParams | null;
+  /** Parámetros de saturación si este módulo es saturator; si no, `null`. */
+  saturatorParams: SaturatorParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -304,6 +319,8 @@ export interface DeviceProfile {
   delayParams?: DelayParams | null;
   /** Parámetros de reverb si se ajustaron en vivo. */
   reverbParams?: ReverbParams | null;
+  /** Parámetros de saturación si se ajustaron en vivo. */
+  saturatorParams?: SaturatorParams | null;
   /** `true` si el bypass global estaba activo al guardar. */
   globalBypass: boolean;
   /** Bypass por módulo que estaba activo al guardar. */
@@ -364,7 +381,8 @@ export type SuggestionAction =
   | { type: "setPitchCorrection"; strength: number; mix: number }
   | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number }
   | { type: "setDelay"; timeMs: number; mix: number }
-  | { type: "setReverb"; wet: number; roomSize: number };
+  | { type: "setReverb"; wet: number; roomSize: number }
+  | { type: "setSaturator"; drive: number; mix: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {
