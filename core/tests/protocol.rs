@@ -2,7 +2,8 @@
 //! core, la UI de escritorio y la app móvil.
 
 use voxlfa_core::protocol::{
-    AudioDeviceInfo, ControlCommand, EngineEvent, EngineState, EngineStatus, LevelSample,
+    AudioDeviceInfo, ControlCommand, EngineEvent, EngineState, EngineStatus, FeedbackMode,
+    LevelSample,
 };
 use voxlfa_core::Result;
 
@@ -202,8 +203,11 @@ fn control_command_new_dsp_variants_round_trip() {
         },
         ControlCommand::SetFeedback {
             params: FeedbackSuppressorParams {
+                mode: FeedbackMode::Notch,
                 threshold_db: -30.0,
                 q: 10.0,
+                mu: 0.15,
+                filter_len: 256,
             },
         },
         ControlCommand::SetPitchCorrection {

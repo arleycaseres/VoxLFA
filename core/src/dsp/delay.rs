@@ -366,7 +366,7 @@ mod tests {
             sync_enabled: false,
             duck_amount: 0.0,
         };
-        let mut delay = Delay::from_params(params, 48_000);
+        let delay = Delay::from_params(params, 48_000);
         // Feedback forzado a 0 en Slapback.
         assert_eq!(delay.feedback, 0.0);
     }
@@ -413,7 +413,7 @@ mod tests {
             duck_amount: 0.0,
         };
         let mut delay = Delay::from_params(params, 48_000);
-        let mut input = vec![0.5; 4800];
+        let input = vec![0.5; 4800];
         let mut out = vec![0.0; 4800];
         let info = ProcessingInfo {
             sample_rate: 48_000,

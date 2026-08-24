@@ -4,7 +4,7 @@
 //! real mediante [`crate::dsp::chain::ChainProcessor`].
 
 use crate::protocol::{
-    DelayMode, DspModuleKind, DspModuleSpec, DynamicEqBandParams, EqBand, EqBandKind,
+    DelayMode, DspModuleKind, DspModuleSpec, DynamicEqBandParams, EqBand, EqBandKind, FeedbackMode,
     NoiseGateParams, PresetId, PresetInfo, ReverbMode, SaturatorMode,
 };
 
@@ -97,8 +97,11 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
         module(DspModuleKind::HighPass { cutoff_hz: 80.0 }),
         module(DspModuleKind::Denoise { mix: 1.0 }),
         module(DspModuleKind::FeedbackSuppressor {
+            mode: FeedbackMode::Adaptive,
             threshold_db: -30.0,
             q: 10.0,
+            mu: 0.15,
+            filter_len: 256,
         }),
         module(DspModuleKind::NoiseGate {
             threshold_db: -50.0,
@@ -179,8 +182,11 @@ fn radio() -> Vec<DspModuleSpec> {
         module(DspModuleKind::HighPass { cutoff_hz: 250.0 }),
         module(DspModuleKind::Denoise { mix: 1.0 }),
         module(DspModuleKind::FeedbackSuppressor {
+            mode: FeedbackMode::Notch,
             threshold_db: -30.0,
             q: 10.0,
+            mu: 0.1,
+            filter_len: 256,
         }),
         module(DspModuleKind::NoiseGate {
             threshold_db: -45.0,
@@ -247,8 +253,11 @@ fn warm() -> Vec<DspModuleSpec> {
         module(DspModuleKind::HighPass { cutoff_hz: 70.0 }),
         module(DspModuleKind::Denoise { mix: 1.0 }),
         module(DspModuleKind::FeedbackSuppressor {
+            mode: FeedbackMode::Adaptive,
             threshold_db: -30.0,
             q: 10.0,
+            mu: 0.15,
+            filter_len: 256,
         }),
         module(DspModuleKind::NoiseGate {
             threshold_db: -48.0,

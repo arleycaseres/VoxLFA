@@ -98,15 +98,54 @@ pub struct DenoiseParams {
     pub mix: f32,
 }
 
+/// Modo de supresión de feedback.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FeedbackMode {
+    /// FFT + filtros notch adaptativos (clásico, probado).
+    #[default]
+    Notch,
+    /// Filtro adaptativo FIR (NLMS) que modela la ruta de feedback.
+    Adaptive,
+}
+
 /// Parámetros de supresión de feedback adaptativa (espejo de
 /// `DspModuleKind::FeedbackSuppressor`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedbackSuppressorParams {
-    /// Umbral de detección en dBFS.
+    /// Modo de operación (Notch o Adaptive FIR).
+    #[serde(default)]
+    pub mode: FeedbackMode,
+    /// Umbral de detección en dBFS (solo relevante en modo Notch).
     pub threshold_db: f32,
-    /// Factor de calidad de los filtros notch (mayor = más estrecho).
+    /// Factor de calidad de los filtros notch (solo en modo Notch).
     pub q: f32,
+    /// Tasa de aprendizaje del filtro adaptativo (0.01–0.5, solo en modo Adaptive).
+    #[serde(default = "default_mu")]
+    pub mu: f32,
+    /// Longitud del filtro FIR adaptativo en taps (solo en modo Adaptive).
+    #[serde(default = "default_filter_len")]
+    pub filter_len: u32,
+}
+
+fn default_mu() -> f32 {
+    0.15
+}
+fn default_filter_len() -> u32 {
+    256
+}
+
+impl Default for FeedbackSuppressorParams {
+    fn default() -> Self {
+        Self {
+            mode: FeedbackMode::Notch,
+            threshold_db: -30.0,
+            q: 10.0,
+            mu: 0.15,
+            filter_len: 256,
+        }
+    }
 }
 
 /// Modo de saturación (tipo de distorsión armónica).
@@ -471,12 +510,21 @@ pub enum DspModuleKind {
         /// Mezcla seco/húmedo (0 = sin denoise, 1 = denoise completo).
         mix: f32,
     },
-    /// Supresión de feedback adaptativa (FFT + notch adaptativo).
+    /// Supresión de feedback adaptativa (FFT+notch o FIR adaptativo NLMS).
     FeedbackSuppressor {
-        /// Umbral de detección (dBFS): picos por encima se consideran feedback.
+        /// Modo de operación.
+        #[serde(default)]
+        mode: FeedbackMode,
+        /// Umbral de detección en dBFS (solo en modo Notch).
         threshold_db: f32,
-        /// Factor de calidad de los filtros notch (mayor = más estrecho).
+        /// Factor de calidad de los filtros notch (solo en modo Notch).
         q: f32,
+        /// Tasa de aprendizaje del filtro FIR (solo en modo Adaptive).
+        #[serde(default = "default_mu")]
+        mu: f32,
+        /// Longitud del filtro FIR en taps (solo en modo Adaptive).
+        #[serde(default = "default_filter_len")]
+        filter_len: u32,
     },
     /// Corrección de tono en tiempo real (Auto-Tune / pitch correction).
     PitchCorrection {

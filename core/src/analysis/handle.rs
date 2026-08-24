@@ -83,8 +83,11 @@ impl AnalysisHandle {
             }
             SuggestionAction::SetFeedback { threshold_db, q } => {
                 self.dsp.set_feedback(FeedbackSuppressorParams {
+                    mode: crate::protocol::FeedbackMode::default(),
                     threshold_db: *threshold_db,
                     q: *q,
+                    mu: 0.15,
+                    filter_len: 256,
                 })
             }
             SuggestionAction::SetPitchCorrection { strength, mix } => {

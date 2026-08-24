@@ -130,12 +130,21 @@ export interface DenoiseParams {
   mix: number;
 }
 
+/** Modo de supresión de feedback. */
+export type FeedbackMode = "notch" | "adaptive";
+
 /** Parámetros de supresión de feedback adaptativa. */
 export interface FeedbackSuppressorParams {
-  /** Umbral de detección en dBFS. */
+  /** Modo de operación (Notch o Adaptive FIR). */
+  mode: FeedbackMode;
+  /** Umbral de detección en dBFS (solo en modo Notch). */
   thresholdDb: number;
-  /** Factor de calidad de los filtros notch. */
+  /** Factor de calidad de los filtros notch (solo en modo Notch). */
   q: number;
+  /** Tasa de aprendizaje del filtro FIR (0.01–0.5, solo en modo Adaptive). */
+  mu: number;
+  /** Longitud del filtro FIR adaptativo en taps (solo en modo Adaptive). */
+  filterLen: number;
 }
 
 /** Nota musical raíz para la escala de corrección de tono. */

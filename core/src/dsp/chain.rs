@@ -125,6 +125,8 @@ pub struct ChainProcessor {
     /// Se usa para dividir el procesamiento en pre/post-denoise cuando
     /// la inferencia ONNX se ejecuta en un hilo dedicado.
     denoise_idx: Option<usize>,
+    /// Salida del bloque anterior (para referencia del filtro adaptativo).
+    prev_output: Vec<f32>,
 }
 
 impl ChainProcessor {
@@ -143,6 +145,7 @@ impl ChainProcessor {
             scratch_a: vec![0.0; max_frames],
             scratch_b: vec![0.0; max_frames],
             denoise_idx: None,
+            prev_output: vec![0.0; max_frames],
         };
         chain.apply_preset(preset);
         chain
@@ -415,6 +418,7 @@ impl AudioProcessor for ChainProcessor {
             self.max_frames = frames;
             self.scratch_a.resize(frames, 0.0);
             self.scratch_b.resize(frames, 0.0);
+            self.prev_output.resize(frames, 0.0);
         }
 
         self.scratch_a[..frames].copy_from_slice(&input[..frames]);
@@ -436,6 +440,17 @@ impl AudioProcessor for ChainProcessor {
         }
 
         output[..frames].copy_from_slice(&self.scratch_a[..frames]);
+
+        // Guardar la salida y pasarla como referencia al feedback suppressor
+        // para el siguiente bloque (modo Adaptive FIR).
+        self.prev_output[..frames].copy_from_slice(&output[..frames]);
+        for link in &mut self.links {
+            if link.name == "feedback" && link.enabled && !link.bypass {
+                link.processor
+                    .set_output_reference(&self.prev_output[..frames]);
+            }
+        }
+
         ProcessResult {
             latency_ms: total_latency,
         }
@@ -446,6 +461,7 @@ impl AudioProcessor for ChainProcessor {
     }
 
     fn reset(&mut self) {
+        self.prev_output.fill(0.0);
         for link in &mut self.links {
             link.processor.reset();
         }
@@ -478,6 +494,7 @@ impl ChainProcessor {
             self.max_frames = frames;
             self.scratch_a.resize(frames, 0.0);
             self.scratch_b.resize(frames, 0.0);
+            self.prev_output.resize(frames, 0.0);
         }
 
         let Some(denoise_idx) = self.denoise_idx else {
@@ -536,6 +553,7 @@ impl ChainProcessor {
             self.max_frames = frames;
             self.scratch_a.resize(frames, 0.0);
             self.scratch_b.resize(frames, 0.0);
+            self.prev_output.resize(frames, 0.0);
         }
 
         self.scratch_a[..frames].copy_from_slice(&denoised[..frames]);
@@ -557,6 +575,16 @@ impl ChainProcessor {
         }
 
         output[..frames].copy_from_slice(&self.scratch_a[..frames]);
+
+        // Guardar la salida y pasar referencia al feedback suppressor.
+        self.prev_output[..frames].copy_from_slice(&output[..frames]);
+        for link in &mut self.links {
+            if link.name == "feedback" && link.enabled && !link.bypass {
+                link.processor
+                    .set_output_reference(&self.prev_output[..frames]);
+            }
+        }
+
         ProcessResult {
             latency_ms: total_latency,
         }
@@ -871,7 +899,7 @@ impl DspHandle {
             .ok_or_else(|| Error::audio("el preset actual no tiene feedback suppressor"))?;
         link.feedback_params = Some(params);
 
-        let processor = FeedbackSuppressor::new(params.threshold_db, params.q, self.sample_rate);
+        let processor = FeedbackSuppressor::from_params(params, self.sample_rate);
         self.send(DspCommand::SetFeedbackSuppressor {
             processor: Box::new(processor),
             params,
@@ -1081,9 +1109,18 @@ fn denoise_params_of(kind: &DspModuleKind) -> Option<DenoiseParams> {
 /// si no es feedback.
 fn feedback_params_of(kind: &DspModuleKind) -> Option<FeedbackSuppressorParams> {
     match kind {
-        DspModuleKind::FeedbackSuppressor { threshold_db, q } => Some(FeedbackSuppressorParams {
+        DspModuleKind::FeedbackSuppressor {
+            mode,
+            threshold_db,
+            q,
+            mu,
+            filter_len,
+        } => Some(FeedbackSuppressorParams {
+            mode: *mode,
             threshold_db: *threshold_db,
             q: *q,
+            mu: *mu,
+            filter_len: *filter_len,
         }),
         _ => None,
     }
@@ -1332,9 +1369,22 @@ fn build_processor(
                 ))
             }
         }
-        DspModuleKind::FeedbackSuppressor { threshold_db, q } => {
+        DspModuleKind::FeedbackSuppressor {
+            mode,
+            threshold_db,
+            q,
+            mu,
+            filter_len,
+        } => {
             let _ = max_frames;
-            Box::new(FeedbackSuppressor::new(threshold_db, q, sample_rate))
+            let params = FeedbackSuppressorParams {
+                mode,
+                threshold_db,
+                q,
+                mu,
+                filter_len,
+            };
+            Box::new(FeedbackSuppressor::from_params(params, sample_rate))
         }
         DspModuleKind::PitchCorrection {
             scale,

@@ -223,9 +223,9 @@ const PRESET_DENOISE: Record<PresetId, DenoiseParams | null> = {
 /** Parámetros de feedback suppressor por preset. */
 const PRESET_FEEDBACK: Record<PresetId, FeedbackSuppressorParams | null> = {
   dry: null,
-  vozLimpia: { thresholdDb: -30.0, q: 10.0 },
-  radio: { thresholdDb: -30.0, q: 10.0 },
-  warm: { thresholdDb: -30.0, q: 10.0 },
+  vozLimpia: { mode: "adaptive", thresholdDb: -30.0, q: 10.0, mu: 0.15, filterLen: 256 },
+  radio: { mode: "notch", thresholdDb: -30.0, q: 10.0, mu: 0.1, filterLen: 256 },
+  warm: { mode: "adaptive", thresholdDb: -30.0, q: 10.0, mu: 0.15, filterLen: 256 },
 };
 
 function buildDspState(preset: PresetId): DspState {

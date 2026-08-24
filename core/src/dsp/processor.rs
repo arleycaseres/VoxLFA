@@ -40,4 +40,12 @@ pub trait AudioProcessor: Send {
     ///
     /// Se usa al reiniciar el pipeline o cambiar la frecuencia de muestreo.
     fn reset(&mut self) {}
+
+    /// Provee la salida del bloque anterior como referencia para procesamiento
+    /// adaptativo (p. ej. supresión de feedback con filtro FIR).
+    ///
+    /// La cadena lo llama después de cada bloque para que el procesador tenga
+    /// acceso a lo que se envió al altavoz en el bloque previo. Por defecto es
+    /// un no-op; solo los procesadores adaptativos lo implementan.
+    fn set_output_reference(&mut self, _output: &[f32]) {}
 }
