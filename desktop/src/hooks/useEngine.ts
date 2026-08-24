@@ -22,6 +22,7 @@ import type {
   PresetInfo,
   ReverbParams,
   SaturatorParams,
+  DynamicEqParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -55,6 +56,7 @@ import {
   setDelay,
   setReverb,
   setSaturator,
+  setDynamicEq,
   setTelemetryConsent,
   startEngine,
   stopEngine,
@@ -127,6 +129,8 @@ export interface EngineController {
   setReverb: (params: ReverbParams) => Promise<void>;
   /** Ajusta los parámetros de saturación del preset activo en vivo. */
   setSaturator: (params: SaturatorParams) => Promise<void>;
+  /** Ajusta los parámetros del EQ dinámico del preset activo en vivo. */
+  setDynamicEq: (params: DynamicEqParams) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
@@ -299,6 +303,14 @@ export function useEngine(): EngineController {
   const setSaturatorAction = useCallback(async (params: SaturatorParams) => {
     try {
       await setSaturator(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setDynamicEqAction = useCallback(async (params: DynamicEqParams) => {
+    try {
+      await setDynamicEq(params);
     } catch (err) {
       setError(String(err));
     }
@@ -482,6 +494,7 @@ export function useEngine(): EngineController {
     setDelay: setDelayAction,
     setReverb: setReverbAction,
     setSaturator: setSaturatorAction,
+    setDynamicEq: setDynamicEqAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
     setTelemetryConsent: setTelemetryConsentAction,

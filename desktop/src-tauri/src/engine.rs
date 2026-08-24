@@ -506,6 +506,18 @@ impl EngineManager {
         Ok(())
     }
 
+    pub fn set_dynamic_eq(
+        &mut self,
+        params: voxlfa_core::protocol::DynamicEqParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_dynamic_eq(params.clone())?;
+        self.update_current_profile(|profile| {
+            profile.dynamic_eq_params = Some(params);
+        });
+        Ok(())
+    }
+
     /// Aplica un cambio al perfil del dispositivo en uso, si el motor corre.
     fn update_current_profile(
         &mut self,

@@ -115,6 +115,13 @@ pub enum SuggestionAction {
         /// Mezcla seco/húmedo (0–1).
         mix: f32,
     },
+    /// Ajustar una banda del EQ dinámico.
+    SetDynamicEq {
+        /// Índice de la banda (0–n).
+        band_index: u8,
+        /// Ganancia de maquillaje compensatoria (dB).
+        makeup_db: f32,
+    },
 }
 
 /// Sugerencia generada por el motor de análisis para la voz actual.

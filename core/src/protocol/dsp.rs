@@ -133,6 +133,41 @@ pub struct SaturatorParams {
     pub mix: f32,
 }
 
+/// Parámetros de una banda del EQ dinámico.
+///
+/// Cada banda comprime o expande una región de frecuencia de forma independiente
+/// cuando la energía en esa banda supera el umbral. Análogo a un multiband
+/// compressor con solo una banda.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEqBandParams {
+    /// Frecuencia central de la banda (Hz).
+    pub freq_hz: f32,
+    /// Factor de calidad Q (mayor = banda más estrecha).
+    pub q: f32,
+    /// Umbral (dBFS) a partir del cual actúa la compresión.
+    pub threshold_db: f32,
+    /// Relación de compresión (>1 comprime, 1 = sin efecto).
+    pub ratio: f32,
+    /// Tiempo de ataque (ms): qué rápido responde al superar el umbral.
+    pub attack_ms: f32,
+    /// Tiempo de liberación (ms): qué rápido se relaja al bajar del umbral.
+    pub release_ms: f32,
+    /// Ganancia de maquillaje compensatoria (dB).
+    pub makeup_db: f32,
+}
+
+/// Parámetros del EQ dinámico (espejo de `DspModuleKind::DynamicEq`).
+///
+/// Contiene un conjunto de bandas independientes, cada una con su propia
+/// compresión por banda de frecuencia.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEqParams {
+    /// Bandas del EQ dinámico.
+    pub bands: Vec<DynamicEqBandParams>,
+}
+
 /// Modo del delay (tipo de carácter del eco).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -408,7 +443,7 @@ pub enum DspModuleKind {
         room_size: f32,
         /// Amortiguación de agudos (0–1).
         damping: f32,
-        /// Mezcla seco/húmedo (0 = seco, 1 = reverb completo).
+        /// Mezcla seco/húmedo (0–1, reverb completo).
         wet: f32,
         /// Pre-delay en ms (separa la señal seca de la reverberada).
         pre_delay_ms: f32,
@@ -416,6 +451,11 @@ pub enum DspModuleKind {
         high_cut_hz: f32,
         /// Corte de graves del return del reverb en Hz.
         low_cut_hz: f32,
+    },
+    /// EQ dinámico: compresión por banda de frecuencia.
+    DynamicEq {
+        /// Bandas del EQ dinámico.
+        bands: Vec<DynamicEqBandParams>,
     },
     /// Limitador de seguridad con lookahead (evita clipping).
     Limiter {
@@ -496,6 +536,9 @@ pub struct DspLinkState {
     /// Parámetros actuales de saturación si este módulo es saturator; `None` en
     /// los demás. Refleja los ajustes en vivo con `set_saturator`.
     pub saturator_params: Option<SaturatorParams>,
+    /// Parámetros actuales de EQ dinámico si este módulo es dynamic_eq;
+    /// `None` en los demás. Refleja los ajustes en vivo con `set_dynamic_eq`.
+    pub dynamic_eq_params: Option<DynamicEqParams>,
 }
 
 /// Estado completo de la cadena DSP activa.

@@ -431,6 +431,9 @@ impl AudioEngine {
                             DspCommand::SetLinkSaturator { processor, params } => {
                                 chain.set_link_saturator(processor, params);
                             }
+                            DspCommand::SetLinkDynamicEq { processor, params } => {
+                                chain.set_link_dynamic_eq(processor, params);
+                            }
                         }
                     }
 

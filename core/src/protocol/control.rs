@@ -11,8 +11,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::dsp::{
-    DelayParams, DenoiseParams, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams,
-    PresetId, ReverbParams, SaturatorParams,
+    DelayParams, DenoiseParams, DynamicEqParams, FeedbackSuppressorParams, NoiseGateParams,
+    PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams,
 };
 
 /// Comando de control del motor, enviado por la UI (o el móvil) hacia el core.
@@ -93,5 +93,10 @@ pub enum ControlCommand {
     SetSaturator {
         /// Nuevos parámetros de saturación.
         params: SaturatorParams,
+    },
+    /// Ajusta los parámetros del EQ dinámico del preset activo (motor corriendo).
+    SetDynamicEq {
+        /// Nuevos parámetros del EQ dinámico.
+        params: DynamicEqParams,
     },
 }

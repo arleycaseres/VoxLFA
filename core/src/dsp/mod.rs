@@ -17,6 +17,7 @@ pub mod denoise;
 pub mod denoise_onnx;
 #[cfg(feature = "audio")]
 pub mod denoise_thread;
+pub mod dynamic_eq;
 pub mod eq;
 pub mod feedback;
 pub mod gain;
@@ -42,6 +43,7 @@ pub use delay::{Delay, DelayLine};
 pub use denoise::RnnoiseDenoise;
 #[cfg(feature = "onnx")]
 pub use denoise_onnx::OnnxDenoise;
+pub use dynamic_eq::DynamicEq;
 pub use eq::ParametricEq;
 pub use feedback::FeedbackSuppressor;
 pub use gain::Gain;

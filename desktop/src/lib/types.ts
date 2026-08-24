@@ -236,6 +236,30 @@ export interface SaturatorParams {
   mix: number;
 }
 
+/** Parámetros de una banda del EQ dinámico. */
+export interface DynamicEqBandParams {
+  /** Frecuencia central de la banda (Hz). */
+  freqHz: number;
+  /** Factor de calidad Q. */
+  q: number;
+  /** Umbral (dBFS) de activación. */
+  thresholdDb: number;
+  /** Relación de compresión (> 1). */
+  ratio: number;
+  /** Tiempo de ataque (ms). */
+  attackMs: number;
+  /** Tiempo de liberación (ms). */
+  releaseMs: number;
+  /** Ganancia de maquillaje compensatoria (dB). */
+  makeupDb: number;
+}
+
+/** Parámetros del EQ dinámico. */
+export interface DynamicEqParams {
+  /** Bandas del EQ dinámico. */
+  bands: DynamicEqBandParams[];
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   /** Nombre corto del módulo (identificador para el bypass). */
@@ -260,6 +284,8 @@ export interface DspLinkState {
   reverbParams: ReverbParams | null;
   /** Parámetros de saturación si este módulo es saturator; si no, `null`. */
   saturatorParams: SaturatorParams | null;
+  /** Parámetros de EQ dinámico si este módulo es dynamic_eq; si no, `null`. */
+  dynamicEqParams: DynamicEqParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -321,6 +347,8 @@ export interface DeviceProfile {
   reverbParams?: ReverbParams | null;
   /** Parámetros de saturación si se ajustaron en vivo. */
   saturatorParams?: SaturatorParams | null;
+  /** Parámetros de EQ dinámico si se ajustaron en vivo. */
+  dynamicEqParams?: DynamicEqParams | null;
   /** `true` si el bypass global estaba activo al guardar. */
   globalBypass: boolean;
   /** Bypass por módulo que estaba activo al guardar. */
@@ -382,7 +410,8 @@ export type SuggestionAction =
   | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number }
   | { type: "setDelay"; timeMs: number; mix: number }
   | { type: "setReverb"; wet: number; roomSize: number }
-  | { type: "setSaturator"; drive: number; mix: number };
+  | { type: "setSaturator"; drive: number; mix: number }
+  | { type: "setDynamicEq"; bandIndex: number; makeupDb: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {

@@ -14,6 +14,7 @@ import type {
   DenoiseParams,
   DeviceList,
   DspState,
+  DynamicEqParams,
   EngineEvent,
   EngineStatus,
   FeedbackSuppressorParams,
@@ -196,6 +197,11 @@ export function setReverb(params: ReverbParams): Promise<void> {
 /** Ajusta los parámetros de saturación en vivo. */
 export function setSaturator(params: SaturatorParams): Promise<void> {
   return inTauri() ? invoke<void>("set_saturator", { params }) : mock.setSaturator(params);
+}
+
+/** Ajusta los parámetros del EQ dinámico en vivo. */
+export function setDynamicEq(params: DynamicEqParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_dynamic_eq", { params }) : mock.setDynamicEq(params);
 }
 
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */

@@ -120,7 +120,7 @@ impl AudioProcessor for Compressor {
 
 /// Convierte un tiempo (ms) en el coeficiente de suavizado por muestra:
 /// `coef = 1 - exp(-1 / (τ·fs))`, con `τ = ms/1000`.
-fn time_to_coef(ms: f32, sample_rate: f32) -> f32 {
+pub fn time_to_coef(ms: f32, sample_rate: f32) -> f32 {
     let tau = ms.max(0.001) / 1000.0;
     (1.0 - (-1.0 / (tau * sample_rate)).exp()).clamp(0.0, 1.0)
 }

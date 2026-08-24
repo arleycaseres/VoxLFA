@@ -91,6 +91,12 @@ export function getActionTarget(action: AnyAction): ActionTarget | null {
         control: "Drive / Mezcla",
         detail: `${(action as any).drive}, ${Math.round((action as any).mix * 100)}%`,
       };
+    case "setDynamicEq":
+      return {
+        panel: "EQ Dinámico",
+        control: `Banda ${(action as any).bandIndex + 1}`,
+        detail: `makeup ${(action as any).makeupDb} dB`,
+      };
   }
 
   return null;

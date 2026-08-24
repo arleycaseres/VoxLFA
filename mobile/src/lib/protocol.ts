@@ -154,6 +154,22 @@ export interface SaturatorParams {
   mix: number;
 }
 
+/** Parámetros de una banda del EQ dinámico. */
+export interface DynamicEqBandParams {
+  freqHz: number;
+  q: number;
+  thresholdDb: number;
+  ratio: number;
+  attackMs: number;
+  releaseMs: number;
+  makeupDb: number;
+}
+
+/** Parámetros del EQ dinámico. */
+export interface DynamicEqParams {
+  bands: DynamicEqBandParams[];
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -175,6 +191,8 @@ export interface DspLinkState {
   reverbParams: ReverbParams | null;
   /** Parámetros de saturación si este módulo es saturator; si no, `null`. */
   saturatorParams: SaturatorParams | null;
+  /** Parámetros de EQ dinámico si este módulo es dynamic_eq; si no, `null`. */
+  dynamicEqParams: DynamicEqParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -221,7 +239,8 @@ export type SuggestionAction =
   | { type: "setNoiseGate"; thresholdDb: number; rangeDb: number }
   | { type: "setDelay"; timeMs: number; mix: number }
   | { type: "setReverb"; wet: number; roomSize: number }
-  | { type: "setSaturator"; drive: number; mix: number };
+  | { type: "setSaturator"; drive: number; mix: number }
+  | { type: "setDynamicEq"; bandIndex: number; makeupDb: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {
@@ -271,7 +290,8 @@ export type ControlCommand =
   | { type: "setPitchCorrection"; params: PitchCorrectionParams }
   | { type: "setDelay"; params: DelayParams }
   | { type: "setReverb"; params: ReverbParams }
-  | { type: "setSaturator"; params: SaturatorParams };
+  | { type: "setSaturator"; params: SaturatorParams }
+  | { type: "setDynamicEq"; params: DynamicEqParams };
 
 /**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).

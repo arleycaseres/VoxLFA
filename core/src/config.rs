@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
-    DelayParams, DenoiseParams, EqBand, FeedbackSuppressorParams, NoiseGateParams,
+    DelayParams, DenoiseParams, DynamicEqParams, EqBand, FeedbackSuppressorParams, NoiseGateParams,
     PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams,
 };
 use crate::Result;
@@ -95,6 +95,10 @@ pub struct DeviceProfile {
     /// ajustaron en vivo; `None` = usar los del preset.
     #[serde(default)]
     pub saturator_params: Option<SaturatorParams>,
+    /// Parámetros de EQ dinámico si el preset de este perfil lo tiene y se
+    /// ajustaron en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub dynamic_eq_params: Option<DynamicEqParams>,
     /// `true` si el bypass global estaba activo al guardar.
     #[serde(default)]
     pub global_bypass: bool,
@@ -131,6 +135,7 @@ impl AppConfig {
             delay_params: None,
             reverb_params: None,
             saturator_params: None,
+            dynamic_eq_params: None,
             global_bypass: false,
             link_bypass: HashMap::new(),
         });

@@ -1651,6 +1651,135 @@
   text-align: right;
 }
 
+/* ---------- Panel de EQ dinámico ---------- */
+.dynamiceqpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.dynamiceqpanel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.dynamiceqpanel__title {
+  font-family: var(--font-display);
+  font-size: 0.64rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+.dynamiceqpanel__state {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+}
+
+.dynamiceqpanel__state--on {
+  color: var(--color-cyan);
+  border-color: var(--color-cyan);
+}
+
+.dynamiceqpanel__state--off {
+  color: var(--color-text-dim);
+  border-color: var(--color-border);
+}
+
+.dynamiceqpanel__empty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--color-text-dim);
+}
+
+.dynamiceqpanel__band {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+
+.dynamiceqpanel__band-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-cyan);
+}
+
+.dynamiceqpanel__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.dynamiceqpanel__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.64rem;
+}
+
+.dynamiceqpanel__name {
+  color: var(--color-text);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-family: var(--font-display);
+}
+
+.dynamiceqpanel__value {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  color: var(--color-cyan);
+}
+
+.dynamiceqpanel__track {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dynamiceqpanel__slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--color-cyan);
+}
+
+.dynamiceqpanel__slider:disabled {
+  opacity: 0.4;
+}
+
+.dynamiceqpanel__scale {
+  font-family: var(--font-mono);
+  font-size: 0.54rem;
+  color: var(--color-text-dim);
+  flex: 0 0 auto;
+}
+
+.dynamiceqpanel__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.dynamiceqpanel__hint {
+  font-size: 0.62rem;
+  color: var(--color-text-dim);
+  text-align: right;
+}
+
 .ai-placeholder {
   display: flex;
   flex-direction: column;

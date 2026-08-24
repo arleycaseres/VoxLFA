@@ -23,6 +23,7 @@ import { PitchCorrectionPanel } from "./components/PitchCorrectionPanel";
 import { DelayPanel } from "./components/DelayPanel";
 import { ReverbPanel } from "./components/ReverbPanel";
 import { SaturatorPanel } from "./components/SaturatorPanel";
+import { DynamicEqPanel } from "./components/DynamicEqPanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
 import { FloatingSuggestion } from "./components/FloatingSuggestion";
 import { SpectrumView } from "./components/SpectrumView";
@@ -334,6 +335,13 @@ export default function App() {
             dsp={engine.dsp}
             running={running}
             onSetSaturator={(params) => void engine.setSaturator(params)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">EQ Dinámico</h2>
+          <DynamicEqPanel
+            dsp={engine.dsp}
+            running={running}
+            onSetDynamicEq={(params) => void engine.setDynamicEq(params)}
           />
 
           {engine.error && <p className="controls__error">{engine.error}</p>}

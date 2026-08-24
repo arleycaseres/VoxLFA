@@ -13,14 +13,14 @@ use std::sync::{mpsc, Arc, Mutex};
 #[cfg(feature = "rnnoise")]
 use crate::dsp::RnnoiseDenoise;
 use crate::dsp::{
-    AudioProcessor, BoomSuppressor, Compressor, DeEsser, FeedbackSuppressor, Gain, HighPass,
-    Limiter, NoiseGate, Notch, ParametricEq, ProcessResult, ProcessingInfo, Saturator,
+    AudioProcessor, BoomSuppressor, Compressor, DeEsser, DynamicEq, FeedbackSuppressor, Gain,
+    HighPass, Limiter, NoiseGate, Notch, ParametricEq, ProcessResult, ProcessingInfo, Saturator,
 };
 use crate::error::Error;
 use crate::protocol::{
-    DelayParams, DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState, EngineEvent,
-    EqBand, FeedbackSuppressorParams, NoiseGateParams, PitchCorrectionParams, PresetId,
-    ReverbParams, SaturatorParams,
+    DelayParams, DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState,
+    DynamicEqParams, EngineEvent, EqBand, FeedbackSuppressorParams, NoiseGateParams,
+    PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams,
 };
 use crate::Result;
 
@@ -105,6 +105,8 @@ struct ChainLink {
     reverb_params: Option<ReverbParams>,
     /// Parámetros actuales de saturación si este eslabón es saturator; `None` si no.
     saturator_params: Option<SaturatorParams>,
+    /// Parámetros actuales de EQ dinámico si este eslabón es dynamic_eq; `None` si no.
+    dynamic_eq_params: Option<DynamicEqParams>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -161,6 +163,7 @@ impl ChainProcessor {
                 let delay_params = delay_params_of(&spec.kind);
                 let reverb_params = reverb_params_of(&spec.kind);
                 let saturator_params = saturator_params_of(&spec.kind);
+                let dynamic_eq_params = dynamic_eq_params_of(&spec.kind);
                 ChainLink {
                     name: module_name(&spec.kind),
                     enabled: spec.enabled,
@@ -174,6 +177,7 @@ impl ChainProcessor {
                     delay_params,
                     reverb_params,
                     saturator_params,
+                    dynamic_eq_params,
                 }
             })
             .collect();
@@ -353,6 +357,22 @@ impl ChainProcessor {
         }
     }
 
+    /// Reemplaza el procesador de EQ dinámico de un eslabón (ajuste en vivo).
+    pub fn set_link_dynamic_eq(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: DynamicEqParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "dynamic_eq") {
+            Some(link) => {
+                link.processor = processor;
+                link.dynamic_eq_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -373,6 +393,7 @@ impl ChainProcessor {
                     delay_params: link.delay_params,
                     reverb_params: link.reverb_params,
                     saturator_params: link.saturator_params,
+                    dynamic_eq_params: link.dynamic_eq_params.clone(),
                 })
                 .collect(),
         }
@@ -619,6 +640,13 @@ pub enum DspCommand {
         /// Parámetros actuales de saturación para el estado de la cadena.
         params: SaturatorParams,
     },
+    /// Reemplazar el procesador de EQ dinámico (ajuste en vivo).
+    SetLinkDynamicEq {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de EQ dinámico para el estado de la cadena.
+        params: DynamicEqParams,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -664,6 +692,7 @@ impl DspHandle {
                     delay_params: delay_params_of(&spec.kind),
                     reverb_params: reverb_params_of(&spec.kind),
                     saturator_params: saturator_params_of(&spec.kind),
+                    dynamic_eq_params: dynamic_eq_params_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -945,6 +974,25 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Ajusta los parámetros del EQ dinámico en vivo.
+    pub fn set_dynamic_eq(&self, params: DynamicEqParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "dynamic_eq")
+            .ok_or_else(|| Error::audio("el preset actual no tiene EQ dinámico"))?;
+        link.dynamic_eq_params = Some(params.clone());
+
+        let processor = super::dynamic_eq::DynamicEq::from_params(&params, self.sample_rate);
+        self.send(DspCommand::SetLinkDynamicEq {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -983,6 +1031,7 @@ fn module_name(kind: &DspModuleKind) -> &'static str {
         DspModuleKind::Saturator { .. } => "saturator",
         DspModuleKind::Delay { .. } => "delay",
         DspModuleKind::Reverb { .. } => "reverb",
+        DspModuleKind::DynamicEq { .. } => "dynamic_eq",
         DspModuleKind::Limiter { .. } => "limiter",
         DspModuleKind::Denoise { .. } => "denoise",
         DspModuleKind::FeedbackSuppressor { .. } => "feedback",
@@ -1124,6 +1173,15 @@ fn saturator_params_of(kind: &DspModuleKind) -> Option<SaturatorParams> {
     }
 }
 
+fn dynamic_eq_params_of(kind: &DspModuleKind) -> Option<DynamicEqParams> {
+    match kind {
+        DspModuleKind::DynamicEq { bands } => Some(DynamicEqParams {
+            bands: bands.clone(),
+        }),
+        _ => None,
+    }
+}
+
 /// Construye el procesador real para una especificación de módulo.
 fn build_processor(
     spec: DspModuleSpec,
@@ -1228,6 +1286,10 @@ fn build_processor(
                 low_cut_hz,
             };
             Box::new(super::reverb::Reverb::from_params(params, sample_rate))
+        }
+        DspModuleKind::DynamicEq { bands } => {
+            let _ = max_frames;
+            Box::new(DynamicEq::new(&bands, sample_rate))
         }
         DspModuleKind::Limiter {
             threshold_db,

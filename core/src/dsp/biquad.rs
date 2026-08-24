@@ -16,6 +16,8 @@ pub enum BiquadKind {
     LowPass,
     /// Paso altos (corta las frecuencias bajas).
     HighPass,
+    /// Pasabanda (extrae una región de frecuencia).
+    BandPass,
     /// Banda de pico (campana) con ganancia ajustable.
     Peaking,
     /// Muesca (notch): elimina una frecuencia concreta (antifeedback).
@@ -83,6 +85,7 @@ impl BiquadCoeffs {
                 let b0 = (1.0 + cos) * 0.5;
                 (b0, -(1.0 + cos), b0, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
             }
+            BiquadKind::BandPass => (alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cos, 1.0 - alpha),
             BiquadKind::Peaking => (
                 1.0 + alpha * a,
                 -2.0 * cos,

@@ -264,6 +264,7 @@ fn engine_event_dsp_serializes_with_type_tag() {
             delay_params: None,
             reverb_params: None,
             saturator_params: None,
+            dynamic_eq_params: None,
         }],
     });
 

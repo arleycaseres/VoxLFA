@@ -4,8 +4,8 @@
 //! real mediante [`crate::dsp::chain::ChainProcessor`].
 
 use crate::protocol::{
-    DelayMode, DspModuleKind, DspModuleSpec, EqBand, EqBandKind, NoiseGateParams, PresetId,
-    PresetInfo, ReverbMode, SaturatorMode,
+    DelayMode, DspModuleKind, DspModuleSpec, DynamicEqBandParams, EqBand, EqBandKind,
+    NoiseGateParams, PresetId, PresetInfo, ReverbMode, SaturatorMode,
 };
 
 /// Fábrica de presets: devuelve la especificación de cadena de cada uno.
@@ -118,6 +118,17 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
                 band(EqBandKind::Peaking, 3000.0, 2.0, 1.5),
                 band(EqBandKind::HighShelf, 8000.0, 1.5, 0.8),
             ],
+        }),
+        module(DspModuleKind::DynamicEq {
+            bands: vec![DynamicEqBandParams {
+                freq_hz: 3000.0,
+                q: 1.0,
+                threshold_db: -24.0,
+                ratio: 2.0,
+                attack_ms: 5.0,
+                release_ms: 150.0,
+                makeup_db: 0.0,
+            }],
         }),
         module(DspModuleKind::DeEsser {
             threshold_db: -32.0,

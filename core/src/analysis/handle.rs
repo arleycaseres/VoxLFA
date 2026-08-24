@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use crate::dsp::DspHandle;
 use crate::error::Error;
 use crate::protocol::{
-    AnalysisSample, DelayParams, DenoiseParams, FeedbackSuppressorParams, PitchCorrectionParams,
-    ReverbParams, SaturatorParams, SessionSummary, SuggestionAction,
+    AnalysisSample, DelayParams, DenoiseParams, DynamicEqParams, FeedbackSuppressorParams,
+    PitchCorrectionParams, ReverbParams, SaturatorParams, SessionSummary, SuggestionAction,
 };
 use crate::Result;
 
@@ -132,6 +132,23 @@ impl AnalysisHandle {
                     drive: *drive,
                     mix: *mix,
                 })
+            }
+            SuggestionAction::SetDynamicEq {
+                band_index,
+                makeup_db,
+            } => {
+                let mut current = self
+                    .dsp
+                    .get_state()?
+                    .links
+                    .iter()
+                    .find(|l| l.name == "dynamic_eq")
+                    .and_then(|l| l.dynamic_eq_params.clone())
+                    .unwrap_or(DynamicEqParams { bands: vec![] });
+                if let Some(band) = current.bands.get_mut(*band_index as usize) {
+                    band.makeup_db = *makeup_db;
+                }
+                self.dsp.set_dynamic_eq(current)
             }
         }
     }

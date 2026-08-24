@@ -28,6 +28,7 @@ import type {
   PresetInfo,
   ReverbParams,
   SaturatorParams,
+  DynamicEqParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -240,6 +241,7 @@ function buildDspState(preset: PresetId): DspState {
     delayParams: null,
     reverbParams: null,
     saturatorParams: null,
+    dynamicEqParams: null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -709,6 +711,19 @@ export function setSaturator(params: SaturatorParams): Promise<void> {
     links: dspState.links.map((item) =>
       item.name === "saturator"
         ? { ...item, saturatorParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setDynamicEq(params: DynamicEqParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "dynamic_eq"
+        ? { ...item, dynamicEqParams: params }
         : item,
     ),
   };
