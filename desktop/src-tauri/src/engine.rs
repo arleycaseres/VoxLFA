@@ -82,11 +82,11 @@ pub(crate) struct PendingStart {
     /// Configuración para `AudioEngine::start()` (consumida en el hilo de
     /// arranque antes de llamar a `complete_start`).
     #[allow(dead_code)]
-    pub engine_config: AudioEngineConfig,
+    pub engine_config: Option<AudioEngineConfig>,
     /// Extremo transmisor del canal de eventos del motor (consumido por
     /// `AudioEngine::start()` en el hilo de arranque).
     #[allow(dead_code)]
-    pub event_tx: mpsc::Sender<EngineEvent>,
+    pub event_tx: Option<mpsc::Sender<EngineEvent>>,
     pub event_rx: mpsc::Receiver<EngineEvent>,
     pub profile_key: String,
     pub profile: Option<voxlfa_core::config::DeviceProfile>,
@@ -212,8 +212,8 @@ impl EngineManager {
         let (event_tx, event_rx) = mpsc::channel();
 
         Ok(PendingStart {
-            engine_config,
-            event_tx,
+            engine_config: Some(engine_config),
+            event_tx: Some(event_tx),
             event_rx,
             profile_key,
             profile,

@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use log::info;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -20,7 +19,7 @@ use voxlfa_core::protocol::{
 };
 use voxlfa_core::telemetry;
 
-use crate::engine::{EngineManager, FrontendCallback, PendingStart};
+use crate::engine::{EngineManager, FrontendCallback};
 use crate::mdns::MdnsAdvertiser;
 use crate::pairing::{PairingState, DEFAULT_CODE_LENGTH};
 use crate::ws::run_ws_server;
@@ -180,7 +179,7 @@ fn start_engine(
          El dispositivo puede estar ocupado o ser incompatible.";
 
     // --- Fase 1: validar y preparar (bajo lock, operación rápida) -----------
-    let pending = {
+    let mut pending = {
         let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
 
         let on_frontend = {
@@ -215,7 +214,10 @@ fn start_engine(
         .name("voxlfa-engine-start".to_string())
         .spawn(move || {
             let core_result =
-                voxlfa_core::audio::AudioEngine::start(pending.engine_config, pending.event_tx);
+                voxlfa_core::audio::AudioEngine::start(
+                    pending.engine_config.take().expect("engine_config already taken"),
+                    pending.event_tx.take().expect("event_tx already taken"),
+                );
 
             // Si alguien ya canceló (timeout o startup más reciente), limpiar.
             if cancel_clone.load(Ordering::Relaxed) {
