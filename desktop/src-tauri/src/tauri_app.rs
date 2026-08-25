@@ -382,6 +382,16 @@ fn set_dynamic_eq(
     engine.set_dynamic_eq(params).map_err(|err| err.to_string())
 }
 
+/// Ajusta los parámetros del harmonizer del preset activo en vivo.
+#[tauri::command]
+fn set_harmonizer(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::HarmonizerParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.set_harmonizer(params).map_err(|err| err.to_string())
+}
+
 /// Pide sugerencias al asesor de IA (Groq) con las métricas actuales.
 ///
 /// Ejecuta la petición HTTP en un hilo bloqueante para no bloquear la UI.
@@ -552,6 +562,7 @@ pub fn run() {
             set_reverb,
             set_saturator,
             set_dynamic_eq,
+            set_harmonizer,
             request_ai_suggestions,
             get_ai_suggestions,
             get_config,

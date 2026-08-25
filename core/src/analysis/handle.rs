@@ -11,7 +11,8 @@ use crate::dsp::DspHandle;
 use crate::error::Error;
 use crate::protocol::{
     AnalysisSample, DelayParams, DenoiseParams, DynamicEqParams, FeedbackSuppressorParams,
-    PitchCorrectionParams, ReverbParams, SaturatorParams, SessionSummary, SuggestionAction,
+    HarmonizerParams, PitchCorrectionParams, ReverbParams, SaturatorParams, SessionSummary,
+    SuggestionAction,
 };
 use crate::Result;
 
@@ -152,6 +153,21 @@ impl AnalysisHandle {
                     band.makeup_db = *makeup_db;
                 }
                 self.dsp.set_dynamic_eq(current)
+            }
+            SuggestionAction::SetHarmonizer { mix } => {
+                let current = self
+                    .dsp
+                    .get_state()?
+                    .links
+                    .iter()
+                    .find(|l| l.name == "harmonizer")
+                    .and_then(|l| l.harmonizer_params.clone())
+                    .unwrap_or_default();
+                self.dsp.set_harmonizer(HarmonizerParams {
+                    intervals: current.intervals,
+                    mix: *mix,
+                    voices_per_interval: current.voices_per_interval,
+                })
             }
         }
     }

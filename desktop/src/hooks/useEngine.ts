@@ -23,6 +23,7 @@ import type {
   ReverbParams,
   SaturatorParams,
   DynamicEqParams,
+  HarmonizerParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
@@ -57,6 +58,7 @@ import {
   setReverb,
   setSaturator,
   setDynamicEq,
+  setHarmonizer,
   setTelemetryConsent,
   startEngine,
   stopEngine,
@@ -131,6 +133,8 @@ export interface EngineController {
   setSaturator: (params: SaturatorParams) => Promise<void>;
   /** Ajusta los parámetros del EQ dinámico del preset activo en vivo. */
   setDynamicEq: (params: DynamicEqParams) => Promise<void>;
+  /** Ajusta los parámetros del harmonizer del preset activo en vivo. */
+  setHarmonizer: (params: HarmonizerParams) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
@@ -316,6 +320,14 @@ export function useEngine(): EngineController {
     }
   }, []);
 
+  const setHarmonizerAction = useCallback(async (params: HarmonizerParams) => {
+    try {
+      await setHarmonizer(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
   const applySuggestionAction = useCallback(async (suggestionId: number) => {
     try {
       await applySuggestion(suggestionId);
@@ -495,6 +507,7 @@ export function useEngine(): EngineController {
     setReverb: setReverbAction,
     setSaturator: setSaturatorAction,
     setDynamicEq: setDynamicEqAction,
+    setHarmonizer: setHarmonizerAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
     setTelemetryConsent: setTelemetryConsentAction,

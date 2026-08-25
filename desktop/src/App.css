@@ -1140,6 +1140,219 @@
   text-align: right;
 }
 
+/* ── Harmonizer panel ───────────────────────────────────────────────── */
+
+.harmonizerpanel {
+  background: var(--color-bg-panel);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.harmonizerpanel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.harmonizerpanel__title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.harmonizerpanel__state {
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.harmonizerpanel__state--on {
+  color: var(--color-success);
+}
+
+.harmonizerpanel__state--off {
+  color: var(--color-text-dim);
+}
+
+.harmonizerpanel__empty {
+  font-size: 0.65rem;
+  color: var(--color-text-dim);
+  text-align: center;
+  padding: 0.4rem 0;
+}
+
+.harmonizerpanel__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.harmonizerpanel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.harmonizerpanel__name {
+  font-size: 0.62rem;
+  color: var(--color-text-dim);
+}
+
+.harmonizerpanel__value {
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  color: var(--color-text);
+}
+
+.harmonizerpanel__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.harmonizerpanel__preset-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-dim);
+  font-size: 0.58rem;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.harmonizerpanel__preset-btn:hover:not(:disabled) {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+
+.harmonizerpanel__preset-btn--active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-bg);
+}
+
+.harmonizerpanel__preset-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.harmonizerpanel__custom-row {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.harmonizerpanel__input {
+  width: 3.5rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  padding: 0.2rem 0.35rem;
+  text-align: center;
+}
+
+.harmonizerpanel__input:focus {
+  outline: 1px solid var(--color-accent);
+}
+
+.harmonizerpanel__add-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 0.7rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.harmonizerpanel__add-btn:hover:not(:disabled) {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.harmonizerpanel__add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.harmonizerpanel__chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.2rem;
+}
+
+.harmonizerpanel__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: var(--color-accent-muted);
+  border-radius: var(--radius-sm);
+  font-size: 0.58rem;
+  font-family: var(--font-mono);
+  color: var(--color-text);
+  padding: 0.15rem 0.35rem;
+}
+
+.harmonizerpanel__chip-x {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 0.65rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.harmonizerpanel__chip-x:hover {
+  color: var(--color-error);
+}
+
+.harmonizerpanel__track {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.harmonizerpanel__slider {
+  flex: 1;
+  accent-color: var(--color-accent);
+  height: 0.25rem;
+}
+
+.harmonizerpanel__slider:disabled {
+  opacity: 0.4;
+}
+
+.harmonizerpanel__scale {
+  font-size: 0.55rem;
+  font-family: var(--font-mono);
+  color: var(--color-text-dim);
+  min-width: 2rem;
+}
+
+.harmonizerpanel__foot {
+  margin-top: 0.15rem;
+}
+
+.harmonizerpanel__hint {
+  font-size: 0.62rem;
+  color: var(--color-text-dim);
+  text-align: right;
+}
+
 /* ── Pitch correction panel ─────────────────────────────────────────── */
 
 .pitchcorrectionpanel {

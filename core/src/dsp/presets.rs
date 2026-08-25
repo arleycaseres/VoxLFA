@@ -5,7 +5,7 @@
 
 use crate::protocol::{
     DelayMode, DspModuleKind, DspModuleSpec, DynamicEqBandParams, EqBand, EqBandKind, FeedbackMode,
-    NoiseGateParams, PresetId, PresetInfo, ReverbMode, SaturatorMode,
+    HarmonizerParams, NoiseGateParams, PresetId, PresetInfo, ReverbMode, SaturatorMode,
 };
 
 /// Fábrica de presets: devuelve la especificación de cadena de cada uno.
@@ -35,6 +35,16 @@ impl PresetFactory {
                 name: "Warm".into(),
                 description: "Bajos suaves y presencia vocal cálida.".into(),
             },
+            PresetInfo {
+                id: PresetId::Monitor,
+                name: "Monitor".into(),
+                description: "Mínimo procesamiento para monitor de escenario.".into(),
+            },
+            PresetInfo {
+                id: PresetId::Foh,
+                name: "FOH".into(),
+                description: "Mezcla completa para el PA principal.".into(),
+            },
         ]
     }
 
@@ -45,6 +55,8 @@ impl PresetFactory {
             PresetId::VozLimpia => voce_limpia(),
             PresetId::Radio => radio(),
             PresetId::Warm => warm(),
+            PresetId::Monitor => monitor(),
+            PresetId::Foh => foh(),
         }
     }
 
@@ -83,6 +95,24 @@ impl PresetFactory {
                     release_ms,
                     hold_ms,
                     range_db,
+                }),
+                _ => None,
+            })
+    }
+
+    /// Parámetros por defecto del harmonizer de un preset, o `None` si no tiene.
+    pub fn harmonizer_params(preset: PresetId) -> Option<HarmonizerParams> {
+        Self::specs(preset)
+            .into_iter()
+            .find_map(|spec| match spec.kind {
+                DspModuleKind::Harmonizer {
+                    intervals,
+                    mix,
+                    voices_per_interval,
+                } => Some(HarmonizerParams {
+                    intervals,
+                    mix,
+                    voices_per_interval,
                 }),
                 _ => None,
             })
@@ -144,6 +174,11 @@ fn voce_limpia() -> Vec<DspModuleSpec> {
             attack_ms: 5.0,
             release_ms: 80.0,
             makeup_db: 3.0,
+        }),
+        module(DspModuleKind::Harmonizer {
+            intervals: vec![-12, 0, 12],
+            mix: 0.1,
+            voices_per_interval: 1,
         }),
         module(DspModuleKind::Delay {
             mode: DelayMode::Slapback,
@@ -285,6 +320,11 @@ fn warm() -> Vec<DspModuleSpec> {
             release_ms: 150.0,
             makeup_db: 4.0,
         }),
+        module(DspModuleKind::Harmonizer {
+            intervals: vec![-12, 0, 12],
+            mix: 0.15,
+            voices_per_interval: 2,
+        }),
         module(DspModuleKind::Delay {
             mode: DelayMode::Digital,
             time_ms: 80.0,
@@ -303,6 +343,143 @@ fn warm() -> Vec<DspModuleSpec> {
             damping: 0.3,
             wet: 0.12,
             pre_delay_ms: 20.0,
+            high_cut_hz: 7000.0,
+            low_cut_hz: 200.0,
+        }),
+        module(DspModuleKind::Limiter {
+            threshold_db: -1.0,
+            lookahead_ms: 3.0,
+            release_ms: 100.0,
+        }),
+    ]
+}
+
+/// Monitor: configuración mínima para monitor de escenario.
+/// Solo passes-altos, gate, EQ suave, compresor ligero y limiter.
+/// Sin delay/reverb (evita latencia en el monitor).
+fn monitor() -> Vec<DspModuleSpec> {
+    vec![
+        module(DspModuleKind::HighPass { cutoff_hz: 100.0 }),
+        module(DspModuleKind::Denoise { mix: 0.6 }),
+        module(DspModuleKind::FeedbackSuppressor {
+            mode: FeedbackMode::Adaptive,
+            threshold_db: -30.0,
+            q: 10.0,
+            mu: 0.15,
+            filter_len: 256,
+        }),
+        module(DspModuleKind::NoiseGate {
+            threshold_db: -48.0,
+            attack_ms: 2.0,
+            release_ms: 80.0,
+            hold_ms: 100.0,
+            range_db: 35.0,
+        }),
+        module(DspModuleKind::Eq {
+            bands: vec![
+                band(EqBandKind::LowShelf, 200.0, -1.5, 0.8),
+                band(EqBandKind::Peaking, 3000.0, 1.5, 1.5),
+            ],
+        }),
+        module(DspModuleKind::Compressor {
+            threshold_db: -22.0,
+            ratio: 3.0,
+            attack_ms: 5.0,
+            release_ms: 80.0,
+            makeup_db: 3.0,
+        }),
+        module(DspModuleKind::Limiter {
+            threshold_db: -1.0,
+            lookahead_ms: 3.0,
+            release_ms: 100.0,
+        }),
+    ]
+}
+
+/// FOH (Front of House): mezcla completa para el PA principal.
+/// Cadena similar a VozLimpia pero con más presencia, harmonizer y reverb más
+/// generoso para llenar el espacio de la sala.
+fn foh() -> Vec<DspModuleSpec> {
+    vec![
+        module(DspModuleKind::HighPass { cutoff_hz: 80.0 }),
+        module(DspModuleKind::Denoise { mix: 0.8 }),
+        module(DspModuleKind::FeedbackSuppressor {
+            mode: FeedbackMode::Adaptive,
+            threshold_db: -30.0,
+            q: 10.0,
+            mu: 0.15,
+            filter_len: 256,
+        }),
+        module(DspModuleKind::NoiseGate {
+            threshold_db: -50.0,
+            attack_ms: 2.0,
+            release_ms: 100.0,
+            hold_ms: 120.0,
+            range_db: 40.0,
+        }),
+        module(DspModuleKind::BoomSuppressor {
+            threshold_db: -30.0,
+            freq_hz: 250.0,
+            amount: 0.5,
+        }),
+        module(DspModuleKind::Eq {
+            bands: vec![
+                band(EqBandKind::LowShelf, 200.0, -2.0, 0.8),
+                band(EqBandKind::Peaking, 3000.0, 2.5, 1.5),
+                band(EqBandKind::HighShelf, 8000.0, 2.0, 0.8),
+            ],
+        }),
+        module(DspModuleKind::DynamicEq {
+            bands: vec![DynamicEqBandParams {
+                freq_hz: 3000.0,
+                q: 1.0,
+                threshold_db: -24.0,
+                ratio: 2.0,
+                attack_ms: 5.0,
+                release_ms: 150.0,
+                makeup_db: 0.0,
+            }],
+        }),
+        module(DspModuleKind::DeEsser {
+            threshold_db: -32.0,
+            freq_hz: 6500.0,
+            amount: 0.5,
+        }),
+        module(DspModuleKind::Compressor {
+            threshold_db: -24.0,
+            ratio: 3.5,
+            attack_ms: 5.0,
+            release_ms: 80.0,
+            makeup_db: 4.0,
+        }),
+        module(DspModuleKind::Saturator {
+            mode: SaturatorMode::Tube,
+            drive: 1.5,
+            mix: 0.2,
+        }),
+        module(DspModuleKind::Harmonizer {
+            intervals: vec![-12, 0, 12],
+            mix: 0.12,
+            voices_per_interval: 2,
+        }),
+        module(DspModuleKind::Delay {
+            mode: DelayMode::Slapback,
+            time_ms: 65.0,
+            feedback: 0.0,
+            mix: 0.1,
+            pre_delay_ms: 0.0,
+            low_cut_hz: 200.0,
+            high_cut_hz: 6000.0,
+            tempo_bpm: 120.0,
+            sync_enabled: false,
+            duck_amount: 0.3,
+        }),
+        module(DspModuleKind::Reverb {
+            mode: ReverbMode::Plate,
+            room_size: 0.4,
+            damping: 0.3,
+            wet: 0.12,
+            pre_delay_ms: 15.0,
             high_cut_hz: 7000.0,
             low_cut_hz: 200.0,
         }),
@@ -336,6 +513,14 @@ fn band(kind: EqBandKind, freq_hz: f32, gain_db: f32, q: f32) -> EqBand {
 mod tests {
     use super::*;
 
+    const ALL_NON_DRY: [PresetId; 5] = [
+        PresetId::VozLimpia,
+        PresetId::Radio,
+        PresetId::Warm,
+        PresetId::Monitor,
+        PresetId::Foh,
+    ];
+
     #[test]
     fn all_presets_have_metadata() {
         let ids: Vec<PresetId> = PresetFactory::all().into_iter().map(|p| p.id).collect();
@@ -345,7 +530,9 @@ mod tests {
                 PresetId::Dry,
                 PresetId::VozLimpia,
                 PresetId::Radio,
-                PresetId::Warm
+                PresetId::Warm,
+                PresetId::Monitor,
+                PresetId::Foh,
             ]
         );
     }
@@ -353,14 +540,14 @@ mod tests {
     #[test]
     fn dry_has_no_links_and_others_have_some() {
         assert!(PresetFactory::specs(PresetId::Dry).is_empty());
-        for preset in [PresetId::VozLimpia, PresetId::Radio, PresetId::Warm] {
+        for preset in ALL_NON_DRY {
             assert!(!PresetFactory::specs(preset).is_empty());
         }
     }
 
     #[test]
     fn all_specs_are_enabled_and_terminate_in_limiter() {
-        for preset in [PresetId::VozLimpia, PresetId::Radio, PresetId::Warm] {
+        for preset in ALL_NON_DRY {
             let specs = PresetFactory::specs(preset);
             assert!(specs.iter().all(|s| s.enabled));
             let last = specs.last().expect("preset no vacío");
@@ -373,7 +560,7 @@ mod tests {
 
     #[test]
     fn non_dry_presets_include_antifeedback() {
-        for preset in [PresetId::VozLimpia, PresetId::Radio, PresetId::Warm] {
+        for preset in ALL_NON_DRY {
             let specs = PresetFactory::specs(preset);
             let has_antifeedback = specs.iter().any(|s| {
                 matches!(
@@ -392,7 +579,7 @@ mod tests {
 
     #[test]
     fn non_dry_presets_include_a_noise_gate() {
-        for preset in [PresetId::VozLimpia, PresetId::Radio, PresetId::Warm] {
+        for preset in ALL_NON_DRY {
             let specs = PresetFactory::specs(preset);
             let has_gate = specs
                 .iter()
@@ -404,5 +591,39 @@ mod tests {
             );
         }
         assert_eq!(PresetFactory::gate_params(PresetId::Dry), None);
+    }
+
+    #[test]
+    fn monitor_has_no_reverb_or_delay() {
+        let specs = PresetFactory::specs(PresetId::Monitor);
+        assert!(
+            !specs
+                .iter()
+                .any(|s| matches!(s.kind, DspModuleKind::Delay { .. })),
+            "Monitor no debería tener delay"
+        );
+        assert!(
+            !specs
+                .iter()
+                .any(|s| matches!(s.kind, DspModuleKind::Reverb { .. })),
+            "Monitor no debería tener reverb"
+        );
+    }
+
+    #[test]
+    fn foh_has_harmonizer_and_saturation() {
+        let specs = PresetFactory::specs(PresetId::Foh);
+        assert!(
+            specs
+                .iter()
+                .any(|s| matches!(s.kind, DspModuleKind::Harmonizer { .. })),
+            "FOH debería tener harmonizer"
+        );
+        assert!(
+            specs
+                .iter()
+                .any(|s| matches!(s.kind, DspModuleKind::Saturator { .. })),
+            "FOH debería tener saturación"
+        );
     }
 }

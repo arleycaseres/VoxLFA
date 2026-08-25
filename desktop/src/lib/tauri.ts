@@ -18,6 +18,7 @@ import type {
   EngineEvent,
   EngineStatus,
   FeedbackSuppressorParams,
+  HarmonizerParams,
   HostList,
   LevelSample,
   ModelStatus,
@@ -202,6 +203,11 @@ export function setSaturator(params: SaturatorParams): Promise<void> {
 /** Ajusta los parámetros del EQ dinámico en vivo. */
 export function setDynamicEq(params: DynamicEqParams): Promise<void> {
   return inTauri() ? invoke<void>("set_dynamic_eq", { params }) : mock.setDynamicEq(params);
+}
+
+/** Ajusta los parámetros del harmonizer en vivo. */
+export function setHarmonizer(params: HarmonizerParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_harmonizer", { params }) : mock.setHarmonizer(params);
 }
 
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */

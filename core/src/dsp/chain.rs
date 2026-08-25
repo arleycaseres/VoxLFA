@@ -14,13 +14,14 @@ use std::sync::{mpsc, Arc, Mutex};
 use crate::dsp::RnnoiseDenoise;
 use crate::dsp::{
     AudioProcessor, BoomSuppressor, Compressor, DeEsser, DynamicEq, FeedbackSuppressor, Gain,
-    HighPass, Limiter, NoiseGate, Notch, ParametricEq, ProcessResult, ProcessingInfo, Saturator,
+    Harmonizer, HighPass, Limiter, NoiseGate, Notch, ParametricEq, ProcessResult, ProcessingInfo,
+    Saturator,
 };
 use crate::error::Error;
 use crate::protocol::{
     DelayParams, DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState,
-    DynamicEqParams, EngineEvent, EqBand, FeedbackSuppressorParams, NoiseGateParams,
-    PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams,
+    DynamicEqParams, EngineEvent, EqBand, FeedbackSuppressorParams, HarmonizerParams,
+    NoiseGateParams, PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams,
 };
 use crate::Result;
 
@@ -107,6 +108,8 @@ struct ChainLink {
     saturator_params: Option<SaturatorParams>,
     /// Parámetros actuales de EQ dinámico si este eslabón es dynamic_eq; `None` si no.
     dynamic_eq_params: Option<DynamicEqParams>,
+    /// Parámetros actuales de harmonizer si este eslabón es harmonizer; `None` si no.
+    harmonizer_params: Option<HarmonizerParams>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -127,6 +130,12 @@ pub struct ChainProcessor {
     denoise_idx: Option<usize>,
     /// Salida del bloque anterior (para referencia del filtro adaptativo).
     prev_output: Vec<f32>,
+    /// Índice de inicio de la zona de send/return (delay ∥ reverb).
+    /// `None` si no hay zona de send/return.
+    send_start: Option<usize>,
+    /// Buffers temporales para el procesamiento paralelo de send/return.
+    send_scratch_a: Vec<f32>,
+    send_scratch_b: Vec<f32>,
 }
 
 impl ChainProcessor {
@@ -146,6 +155,9 @@ impl ChainProcessor {
             scratch_b: vec![0.0; max_frames],
             denoise_idx: None,
             prev_output: vec![0.0; max_frames],
+            send_start: None,
+            send_scratch_a: vec![0.0; max_frames],
+            send_scratch_b: vec![0.0; max_frames],
         };
         chain.apply_preset(preset);
         chain
@@ -167,6 +179,7 @@ impl ChainProcessor {
                 let reverb_params = reverb_params_of(&spec.kind);
                 let saturator_params = saturator_params_of(&spec.kind);
                 let dynamic_eq_params = dynamic_eq_params_of(&spec.kind);
+                let harmonizer_params = harmonizer_params_of(&spec.kind);
                 ChainLink {
                     name: module_name(&spec.kind),
                     enabled: spec.enabled,
@@ -181,12 +194,22 @@ impl ChainProcessor {
                     reverb_params,
                     saturator_params,
                     dynamic_eq_params,
+                    harmonizer_params,
                 }
             })
             .collect();
         // Calcular el índice del eslabón de denoise para el procesamiento
         // dividido (offloaded).
         self.denoise_idx = self.links.iter().position(|l| l.name == "denoise");
+
+        // Detectar la zona de send/return: el primer delay o reverb
+        // consecutivo. A partir de ahí, los efectos se procesan en paralelo
+        // (ambos reciben la misma señal seca y se suman sus contribuciones
+        // húmedas), en lugar de en serie.
+        self.send_start = self
+            .links
+            .iter()
+            .position(|l| l.name == "delay" || l.name == "reverb");
     }
 
     /// Activa o desactiva el bypass de un módulo por su nombre.
@@ -376,6 +399,22 @@ impl ChainProcessor {
         }
     }
 
+    /// Reemplaza el procesador de harmonizer de un eslabón (ajuste en vivo).
+    pub fn set_link_harmonizer(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: HarmonizerParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "harmonizer") {
+            Some(link) => {
+                link.processor = processor;
+                link.harmonizer_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -397,6 +436,7 @@ impl ChainProcessor {
                     reverb_params: link.reverb_params,
                     saturator_params: link.saturator_params,
                     dynamic_eq_params: link.dynamic_eq_params.clone(),
+                    harmonizer_params: link.harmonizer_params.clone(),
                 })
                 .collect(),
         }
@@ -419,13 +459,19 @@ impl AudioProcessor for ChainProcessor {
             self.scratch_a.resize(frames, 0.0);
             self.scratch_b.resize(frames, 0.0);
             self.prev_output.resize(frames, 0.0);
+            self.send_scratch_a.resize(frames, 0.0);
+            self.send_scratch_b.resize(frames, 0.0);
         }
 
         self.scratch_a[..frames].copy_from_slice(&input[..frames]);
 
         let mut total_latency = 0.0;
         if !self.global_bypass {
-            for link in self.links.iter_mut() {
+            let send_start = self.send_start;
+
+            // ── Fase 1: módulos insert (pre-send) ──────────────────────
+            let insert_end = send_start.unwrap_or(self.links.len());
+            for link in self.links[..insert_end].iter_mut() {
                 if !link.enabled || link.bypass {
                     continue;
                 }
@@ -436,6 +482,43 @@ impl AudioProcessor for ChainProcessor {
                 );
                 total_latency += result.latency_ms;
                 std::mem::swap(&mut self.scratch_a, &mut self.scratch_b);
+            }
+
+            // ── Fase 2: send/return (delay ∥ reverb en paralelo) ───────
+            // Ambos efectos reciben la MISMA señal seca (scratch_a) y sus
+            // contribuciones húmedas se suman, evitando que el reverb
+            // procese las colas del delay (el problema del procesamiento
+            // serial clásico).
+            if let Some(start) = send_start {
+                // Señal seca: referencia para extraer solo la parte húmeda.
+                self.send_scratch_a[..frames].copy_from_slice(&self.scratch_a[..frames]);
+                let dry = &self.send_scratch_a[..frames];
+
+                let mut max_send_latency = 0.0f32;
+                for link in self.links[start..].iter_mut() {
+                    if !link.enabled || link.bypass {
+                        continue;
+                    }
+                    let result =
+                        link.processor
+                            .process(dry, &mut self.send_scratch_b[..frames], info);
+                    max_send_latency = max_send_latency.max(result.latency_ms);
+
+                    // Extraer contribución húmeda: output - dry * (1 - mix).
+                    // Esto cancela el componente seco que el procesador ya
+                    // incluye, dejando solo la porción húmeda para sumar.
+                    let mix = send_mix_for_link(link);
+                    let dry_factor = 1.0 - mix;
+                    for (((sa, sb), d), _) in self.scratch_a[..frames]
+                        .iter_mut()
+                        .zip(self.send_scratch_b[..frames].iter_mut())
+                        .zip(dry.iter())
+                        .zip(0..frames)
+                    {
+                        *sa += *sb - *d * dry_factor;
+                    }
+                }
+                total_latency += max_send_latency;
             }
         }
 
@@ -495,6 +578,8 @@ impl ChainProcessor {
             self.scratch_a.resize(frames, 0.0);
             self.scratch_b.resize(frames, 0.0);
             self.prev_output.resize(frames, 0.0);
+            self.send_scratch_a.resize(frames, 0.0);
+            self.send_scratch_b.resize(frames, 0.0);
         }
 
         let Some(denoise_idx) = self.denoise_idx else {
@@ -554,13 +639,23 @@ impl ChainProcessor {
             self.scratch_a.resize(frames, 0.0);
             self.scratch_b.resize(frames, 0.0);
             self.prev_output.resize(frames, 0.0);
+            self.send_scratch_a.resize(frames, 0.0);
+            self.send_scratch_b.resize(frames, 0.0);
         }
 
         self.scratch_a[..frames].copy_from_slice(&denoised[..frames]);
 
         let mut total_latency = 0.0;
         if !self.global_bypass {
-            for link in self.links[(denoise_idx + 1)..].iter_mut() {
+            let post_denoise_start = denoise_idx + 1;
+            let send_start = self
+                .send_start
+                .map(|s| s.max(post_denoise_start))
+                .unwrap_or(self.links.len());
+
+            // ── Fase 1: módulos insert post-denoise ────────────────────
+            let insert_end = send_start;
+            for link in self.links[post_denoise_start..insert_end].iter_mut() {
                 if !link.enabled || link.bypass {
                     continue;
                 }
@@ -571,6 +666,34 @@ impl ChainProcessor {
                 );
                 total_latency += result.latency_ms;
                 std::mem::swap(&mut self.scratch_a, &mut self.scratch_b);
+            }
+
+            // ── Fase 2: send/return (delay ∥ reverb en paralelo) ───────
+            if send_start < self.links.len() {
+                self.send_scratch_a[..frames].copy_from_slice(&self.scratch_a[..frames]);
+                let dry = &self.send_scratch_a[..frames];
+
+                let mut max_send_latency = 0.0f32;
+                for link in self.links[send_start..].iter_mut() {
+                    if !link.enabled || link.bypass {
+                        continue;
+                    }
+                    let result =
+                        link.processor
+                            .process(dry, &mut self.send_scratch_b[..frames], info);
+                    max_send_latency = max_send_latency.max(result.latency_ms);
+
+                    let mix = send_mix_for_link(link);
+                    let dry_factor = 1.0 - mix;
+                    for (idx, (sb, d)) in self.send_scratch_b[..frames]
+                        .iter()
+                        .zip(dry.iter())
+                        .enumerate()
+                    {
+                        self.scratch_a[idx] += *sb - *d * dry_factor;
+                    }
+                }
+                total_latency += max_send_latency;
             }
         }
 
@@ -675,6 +798,13 @@ pub enum DspCommand {
         /// Parámetros actuales de EQ dinámico para el estado de la cadena.
         params: DynamicEqParams,
     },
+    /// Reemplazar el procesador de harmonizer (ajuste en vivo).
+    SetLinkHarmonizer {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de harmonizer para el estado de la cadena.
+        params: HarmonizerParams,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -721,6 +851,7 @@ impl DspHandle {
                     reverb_params: reverb_params_of(&spec.kind),
                     saturator_params: saturator_params_of(&spec.kind),
                     dynamic_eq_params: dynamic_eq_params_of(&spec.kind),
+                    harmonizer_params: harmonizer_params_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -1021,6 +1152,25 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Ajusta los parámetros del harmonizer en vivo.
+    pub fn set_harmonizer(&self, params: HarmonizerParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "harmonizer")
+            .ok_or_else(|| Error::audio("el preset actual no tiene harmonizer"))?;
+        link.harmonizer_params = Some(params.clone());
+
+        let processor = super::harmonizer::Harmonizer::from_params(&params, self.sample_rate);
+        self.send(DspCommand::SetLinkHarmonizer {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -1064,6 +1214,7 @@ fn module_name(kind: &DspModuleKind) -> &'static str {
         DspModuleKind::Denoise { .. } => "denoise",
         DspModuleKind::FeedbackSuppressor { .. } => "feedback",
         DspModuleKind::PitchCorrection { .. } => "pitch_correction",
+        DspModuleKind::Harmonizer { .. } => "harmonizer",
     }
 }
 
@@ -1216,6 +1367,36 @@ fn dynamic_eq_params_of(kind: &DspModuleKind) -> Option<DynamicEqParams> {
             bands: bands.clone(),
         }),
         _ => None,
+    }
+}
+
+fn harmonizer_params_of(kind: &DspModuleKind) -> Option<HarmonizerParams> {
+    match kind {
+        DspModuleKind::Harmonizer {
+            intervals,
+            mix,
+            voices_per_interval,
+        } => Some(HarmonizerParams {
+            intervals: intervals.clone(),
+            mix: *mix,
+            voices_per_interval: *voices_per_interval,
+        }),
+        _ => None,
+    }
+}
+
+/// Devuelve el nivel de mezcla (mix/wet) de un eslabón de send/return.
+///
+/// Se usa para extraer la contribución húmeda del procesador: la diferencia
+/// entre su salida y la señal de entrada multiplicada por `(1 - mix)` es la
+/// porción puramente húmeda que se suma al bus de retorno.
+fn send_mix_for_link(link: &ChainLink) -> f32 {
+    if let Some(ref params) = link.delay_params {
+        params.mix
+    } else if let Some(ref params) = link.reverb_params {
+        params.wet
+    } else {
+        0.0
     }
 }
 
@@ -1400,6 +1581,19 @@ fn build_processor(
                 mix,
             };
             Box::new(super::pitch_correction::PitchCorrection::new(params))
+        }
+        DspModuleKind::Harmonizer {
+            intervals,
+            mix,
+            voices_per_interval,
+        } => {
+            let _ = max_frames;
+            let params = HarmonizerParams {
+                intervals,
+                mix,
+                voices_per_interval,
+            };
+            Box::new(Harmonizer::from_params(&params, sample_rate))
         }
     }
 }

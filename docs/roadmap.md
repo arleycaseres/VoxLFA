@@ -364,13 +364,151 @@ H-Delay, Soundtoys Echoboy, Bricasti M7, Valhalla).
       handlers en `analysis/handle.rs`.
 - [x] Verificación completa (fmt, clippy, 182 tests, builds desktop y móvil).
 
-> **Plan de fases de efectos multi-modo** (3 fases):
+## Fase 10a — Saturación multi-modo ✅
+
+Objetivo: llevar la saturación de armónicos a nivel de consola profesional
+con modos inspirados en tubes y cintas analógicas.
+
+- [x] **Protocolo**: `SaturatorMode` (Tube, Tape, TubeTape), `SaturatorParams`
+      (mode, drive, mix) en `protocol/dsp.rs`.
+- [x] **DSP**: `Saturator` en `dsp/saturator.rs` con 3 modos:
+      - **Tube**: soft clipping asimétrico con armónicos pares dominantes.
+      - **Tape**: compresión suave con rolloff de agudos (filtro LP 8 kHz).
+      - **TubeTape**: dos etapas en cascada (tube → tape × 0.7 drive).
+- [x] **Filtros biquad** en señal wet (LP para modos Tape/TubeTape).
+- [x] **Control**: `set_saturator` en `DspHandle` + `DspCommand::SetLinkSaturator`,
+      `ControlCommand::SetSaturator`, `SuggestionAction::SetSaturator`.
+- [x] **Persistencia**: `saturator_params` en `DeviceProfile`.
+- [x] **Presets**: VozLimpia (tube, drive 0.3, mix 0.1), Radio (tubetape,
+      drive 0.6, mix 0.3), Warm (tape, drive 0.4, mix 0.15), Dry (sin saturador).
+- [x] Verificación completa.
+
+## Fase 10b — Dynamic EQ ✅
+
+Objetivo: compresión por banda de frecuencia (multibanda simplificado) para
+controlar resonancias problemáticas de forma quirúrgica.
+
+- [x] **Protocolo**: `DynamicEqBandParams` (freqHz, q, thresholdDb, ratio,
+      attackMs, releaseMs, makeupDb), `DynamicEqParams` (bands) en
+      `protocol/dsp.rs`.
+- [x] **DSP**: `DynamicEq` en `dsp/dynamic_eq.rs` con extracción paralela por
+      banda (biquad pasabanda sidechain), detector de envolvente pico,
+      compresión con ratio/attack/release y ganancia de maquillaje. Reconstrucción
+      de señal: `input + band × (gain - 1)` preserva frecuencias no afectadas.
+- [x] **Control**: `set_dynamic_eq` en `DspHandle` + `SetLinkDynamicEq`,
+      `ControlCommand::SetDynamicEq`, `SuggestionAction::SetDynamicEq`.
+- [x] **Persistencia**: `dynamic_eq_params` en `DeviceProfile`.
+- [x] **Presets**: VozLimpia (2 bandas: 300 Hz/threshold -30/ratio 2,
+      3000 Hz/threshold -25/ratio 1.5), Radio (1 banda: 3000 Hz/threshold -28/ratio
+      2.5), Warm (1 banda: 250 Hz/threshold -30/ratio 2), Dry (sin dynamic eq).
+- [x] Verificación completa.
+
+## Fase 10c — Supresión de feedback adaptativa FIR (NLMS) ✅
+
+Objetivo: llevar la supresión de feedback al siguiente nivel con un filtro
+adaptativo FIR que modela la ruta de feedback (altavoz → micrófono) y la cancela
+por sustracción.
+
+- [x] **Protocolo**: `FeedbackMode` (Notch, Adaptive) añadido a
+      `FeedbackSuppressorParams` con campos `mu` (tasa de aprendizaje, 0.01–0.5)
+      y `filter_len` (taps, default 256).
+- [x] **DSP**: `FeedbackSuppressor` en `dsp/feedback.rs` con dos modos:
+      - **Notch** (clásico): análisis FFT 2048 + filtros muesca adaptativos (hasta 4).
+      - **Adaptive** (FIR NLMS): filtro FIR adaptativo que estima la ruta de
+        feedback, con límite de divergencia (norma de pesos ≤ 10), energía
+        mínima de referencia para activar adaptación, y `set_output_reference()`.
+- [x] **Trait `AudioProcessor`**: nuevo método `set_output_reference()` para
+      pasar la señal de salida del bloque anterior al feedback suppressor.
+- [x] **Control**: `FeedbackMode` incluido en `ControlCommand::SetFeedback`,
+      `SuggestionAction::SetFeedback` y Tauri commands.
+- [x] **Presets**: VozLimpia y Warm usan modo **Adaptive** (FIR), Radio usa
+      modo **Notch** (clásico).
+- [x] Verificación completa.
+
+## Fase 11 — Harmonizer vocal ✅
+
+Objetivo: generar harmonías vocales en tiempo real con múltiples intervalos
+musicales y copias detuneadas para un sonido más rico.
+
+- [x] **Protocolo**: `HarmonizerParams` (intervals: Vec<i32>, mix: f32,
+      voices_per_interval: u32) en `protocol/dsp.rs`.
+- [x] **DSP**: `Harmonizer` en `dsp/harmonizer.rs` con pitch shifter basado en
+      delay-lines y crossfade triangular. Soporta hasta 8 intervalos × 4 voces
+      = 32 pitch shifters simultáneos. Detuning ±5 cents entre copias para
+      efecto coro. Frecuencia de crossfade ~20 ms a 48 kHz.
+- [x] **Control**: `ControlCommand::SetHarmonizer`, `SuggestionAction::SetHarmonizer`,
+      `DspCommand::SetLinkHarmonizer`, Tauri `set_harmonizer`.
+- [x] **Persistencia**: `harmonizer_params` en `DeviceProfile`.
+- [x] **Presets**: VozLimpia (intervals [-12, 0, 12], mix 0.1, 1 voice),
+      Warm (intervals [-12, 0, 12], mix 0.15, 2 voices), Radio y Dry sin
+      harmonizer.
+- [x] **UI**: `HarmonizerPanel.tsx` con presets de intervalos (Octava, Quinta,
+      Tercera, Unísono, Octava↑, Octava↓), input personalizado, mix slider,
+      voices-per-interval slider (1–4).
+- [x] Verificación completa.
+
+## Fase 11 — Presets Monitor y FOH ✅
+
+Objetivo: presets optimizados para escenarios de uso reales (monitor de
+escenario sin efectos de tiempo, PA principal con la cadena completa).
+
+- [x] **Monitor**: HPF 100Hz, denoise 60%, feedback adaptativo, gate -48dB,
+      EQ suave, compressor 3:1, limiter. **Sin delay ni reverb** (evita latencia
+      en monitores de escenario).
+- [x] **FOH** (Front of House): cadena completa — HPF 80Hz, denoise 80%,
+      feedback, gate, boom suppressor, EQ, dynamic EQ, de-esser, compressor,
+      saturator tube, harmonizer (2 voces), slapback delay, plate reverb,
+      limiter.
+- [x] **Protocolo**: `PresetId::Monitor`, `PresetId::Foh` añadidos al enum.
+- [x] **Persistencia**: ambos presets guardados y reaplicados correctamente.
+- [x] **Desktop TS / Móvil**: `PresetId` actualizado con `"monitor" | "foh"`.
+- [x] Verificación completa.
+
+## Fase 11 — Enrutamiento Send/Return FX ✅
+
+Objetivo: resolver el problema de delay y reverb en serial (reverb procesando
+las colas del delay → sonido embarrado) implementando procesamiento paralelo
+de efectos de tiempo.
+
+- [x] **Problema detectado**: en la cadena serial, el reverb procesa las colas
+      del delay creando un sonido embarrado (reverb de cada repetición del echo).
+- [x] **Solución Send/Return**: delay y reverb procesan la **misma señal seca**
+      (post-compresor) en paralelo, y sus contribuciones húmedas se suman:
+      `output += effect_out - dry * (1 - mix)`.
+- [x] **Detección automática**: `ChainProcessor` detecta el primer delay o
+      reverb en la cadena (`send_start`), procesa los módulos anteriores en
+      serial y los efectos de tiempo en paralelo.
+- [x] **Buffers scratch dedicados**: `send_scratch_a/b` para procesamiento
+      paralelo sin contaminar el buffer principal.
+- [x] **Bypass individual**: cada efecto send/return puede desactivarse
+      independientemente.
+- [x] **Latencia**: se reporta la latencia máxima entre los efectos send.
+- [x] Verificación completa.
+
+## Fase 11 — Corrección de freeze en audio callback ✅
+
+Problema: la app se trababa después de uso prolongado, especialmente con
+dispositivos USB genéricos (ej. "USB AUDIO CODEC").
+
+- [x] **Causa 1 — Harmonizer hot-path**: `harmonizer.process()` creaba un
+      `Vec` nuevo en cada callback (~100 allocs/s → fragmentación del heap).
+      **Solución**: buffer preasignado `harmony_buf` en el struct `Harmonizer`,
+      reutilizado con `truncate` en cada llamada.
+- [x] **Causa 2 — Buffer USB genérico**: la heurística asignaba 256 muestras
+      a interfaces USB no clasificadas, insuficiente para codecs genéricos.
+      **Solución**: cambiado a 512 para USB genérico/budget.
+- [x] **Causa 3 — Reasignaciones en el callback**: `scratch.resize()`,
+      `denoise_in_buf.resize()`, `denoise_out_buf.resize()` reasignaban si el
+      dispositivo USB entregaba buffers más grandes que el nominal.
+      **Solución**: buffers preasignados con `SCRATCH_MAX = 4096` (~85 ms a
+      48 kHz), `truncate` en callback, `resize` solo si estrictamente necesario.
+- [x] Verificación completa.
+
+> **Plan de fases** (actualizado):
 >
-> - **Fase 9** ✅: Delay + Reverb (máxima prioridad, más impacto inmediato)
-> - **Fase 10** (siguiente): Supresión de feedback adaptativa mejorada (FIR),
->       Dynamic EQ (compresor por banda de frecuencia), Saturación multi-modo
->       (Tube/Tape/Tube+Tape)
-> - **Fase 11** (futuro): Harmonizer vocal, Send/Return FX routing, Presets
->       Monitor/FOH separados, Módulo "Sculpt" (un solo control de tono)
-> - **Fase 12** (futuro): Aislamiento de voz en tiempo real, Corrección
->       adaptativa de sala, Mejora vocal con IA
+> - **Fase 9** ✅: Delay + Reverb multi-modo
+> - **Fase 10** ✅: Saturación multi-modo, Dynamic EQ, Feedback FIR adaptativo
+> - **Fase 11** ✅: Harmonizer, Presets Monitor/FOH, Send/Return FX routing, Fix freeze audio callback
+> - **Fase 12** (futuro): Módulo "Sculpt" (un solo control de tono),
+>       Aislamiento de voz en tiempo real, Corrección adaptativa de sala,
+>       Mejora vocal con IA

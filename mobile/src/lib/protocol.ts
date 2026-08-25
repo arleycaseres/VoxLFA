@@ -54,7 +54,7 @@ export interface SpectrumSample {
 }
 
 /** Identificador de un preset de la cabina. */
-export type PresetId = "dry" | "vozLimpia" | "radio" | "warm";
+export type PresetId = "dry" | "vozLimpia" | "radio" | "warm" | "monitor" | "foh";
 
 /** Banda de un ecualizador paramétrico. */
 export interface EqBand {
@@ -179,6 +179,16 @@ export interface DynamicEqParams {
   bands: DynamicEqBandParams[];
 }
 
+/** Parámetros del harmonizer vocal. */
+export interface HarmonizerParams {
+  /** Intervalos en semitonos desde la nota original. */
+  intervals: number[];
+  /** Mezcla seco/húmedo (0–1). */
+  mix: number;
+  /** Número de copias por voz (1–4). */
+  voicesPerInterval: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -202,6 +212,8 @@ export interface DspLinkState {
   saturatorParams: SaturatorParams | null;
   /** Parámetros de EQ dinámico si este módulo es dynamic_eq; si no, `null`. */
   dynamicEqParams: DynamicEqParams | null;
+  /** Parámetros de harmonizer si este módulo es harmonizer; si no, `null`. */
+  harmonizerParams: HarmonizerParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -249,7 +261,8 @@ export type SuggestionAction =
   | { type: "setDelay"; timeMs: number; mix: number }
   | { type: "setReverb"; wet: number; roomSize: number }
   | { type: "setSaturator"; drive: number; mix: number }
-  | { type: "setDynamicEq"; bandIndex: number; makeupDb: number };
+  | { type: "setDynamicEq"; bandIndex: number; makeupDb: number }
+  | { type: "setHarmonizer"; mix: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {
@@ -300,7 +313,8 @@ export type ControlCommand =
   | { type: "setDelay"; params: DelayParams }
   | { type: "setReverb"; params: ReverbParams }
   | { type: "setSaturator"; params: SaturatorParams }
-  | { type: "setDynamicEq"; params: DynamicEqParams };
+  | { type: "setDynamicEq"; params: DynamicEqParams }
+  | { type: "setHarmonizer"; params: HarmonizerParams };
 
 /**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).

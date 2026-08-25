@@ -122,6 +122,11 @@ pub enum SuggestionAction {
         /// Ganancia de maquillaje compensatoria (dB).
         makeup_db: f32,
     },
+    /// Ajustar los parámetros del harmonizer.
+    SetHarmonizer {
+        /// Mezcla seco/húmedo (0–1).
+        mix: f32,
+    },
 }
 
 /// Sugerencia generada por el motor de análisis para la voz actual.

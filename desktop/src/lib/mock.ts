@@ -19,6 +19,7 @@ import type {
   EngineStatus,
   EqBand,
   FeedbackSuppressorParams,
+  HarmonizerParams,
   HostList,
   LevelSample,
   ModelStatus,
@@ -94,9 +95,11 @@ const FAKE_PRESETS: PresetInfo[] = [
 /** Nombres de módulo por preset (espejo de `PresetFactory::specs`). */
 const PRESET_LINKS: Record<PresetId, string[]> = {
   dry: [],
-  vozLimpia: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "deesser", "compressor", "limiter"],
+  vozLimpia: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "dynamic_eq", "deesser", "compressor", "harmonizer", "limiter"],
   radio: ["highpass", "denoise", "noisegate", "notch", "eq", "saturator", "compressor", "limiter"],
-  warm: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "compressor", "reverb", "limiter"],
+  warm: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "compressor", "harmonizer", "reverb", "limiter"],
+  monitor: ["highpass", "denoise", "noisegate", "eq", "compressor", "limiter"],
+  foh: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "dynamic_eq", "deesser", "compressor", "saturator", "harmonizer", "limiter"],
 };
 
 /** Parámetros de la puerta de ruido por preset (espejo del core). */
@@ -105,6 +108,8 @@ const PRESET_GATE: Record<PresetId, NoiseGateParams | null> = {
   vozLimpia: { thresholdDb: -50, attackMs: 2, releaseMs: 100, holdMs: 25, rangeDb: 40 },
   radio: { thresholdDb: -45, attackMs: 1, releaseMs: 80, holdMs: 15, rangeDb: 45 },
   warm: { thresholdDb: -48, attackMs: 3, releaseMs: 120, holdMs: 30, rangeDb: 40 },
+  monitor: { thresholdDb: -48, attackMs: 2, releaseMs: 80, holdMs: 25, rangeDb: 35 },
+  foh: { thresholdDb: -50, attackMs: 2, releaseMs: 100, holdMs: 30, rangeDb: 40 },
 };
 
 /** Bandas del EQ por preset (espejo de los presets del core). */
@@ -123,6 +128,15 @@ const PRESET_EQ: Record<PresetId, EqBand[]> = {
     { kind: "lowShelf", freqHz: 120, gainDb: 3, q: 0.8 },
     { kind: "peaking", freqHz: 2500, gainDb: 1.5, q: 1.5 },
     { kind: "highShelf", freqHz: 7000, gainDb: -2, q: 0.8 },
+  ],
+  monitor: [
+    { kind: "lowShelf", freqHz: 200, gainDb: -1.5, q: 0.8 },
+    { kind: "peaking", freqHz: 3000, gainDb: 1.5, q: 1.5 },
+  ],
+  foh: [
+    { kind: "lowShelf", freqHz: 200, gainDb: -2, q: 0.8 },
+    { kind: "peaking", freqHz: 3000, gainDb: 2.5, q: 1.5 },
+    { kind: "highShelf", freqHz: 8000, gainDb: 2, q: 0.8 },
   ],
 };
 
@@ -218,6 +232,8 @@ const PRESET_DENOISE: Record<PresetId, DenoiseParams | null> = {
   vozLimpia: { mix: 1.0 },
   radio: { mix: 1.0 },
   warm: { mix: 1.0 },
+  monitor: { mix: 0.6 },
+  foh: { mix: 0.8 },
 };
 
 /** Parámetros de feedback suppressor por preset. */
@@ -226,6 +242,8 @@ const PRESET_FEEDBACK: Record<PresetId, FeedbackSuppressorParams | null> = {
   vozLimpia: { mode: "adaptive", thresholdDb: -30.0, q: 10.0, mu: 0.15, filterLen: 256 },
   radio: { mode: "notch", thresholdDb: -30.0, q: 10.0, mu: 0.1, filterLen: 256 },
   warm: { mode: "adaptive", thresholdDb: -30.0, q: 10.0, mu: 0.15, filterLen: 256 },
+  monitor: { mode: "adaptive", thresholdDb: -30.0, q: 10.0, mu: 0.15, filterLen: 256 },
+  foh: { mode: "adaptive", thresholdDb: -30.0, q: 10.0, mu: 0.15, filterLen: 256 },
 };
 
 function buildDspState(preset: PresetId): DspState {
@@ -242,6 +260,7 @@ function buildDspState(preset: PresetId): DspState {
     reverbParams: null,
     saturatorParams: null,
     dynamicEqParams: null,
+    harmonizerParams: null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -724,6 +743,19 @@ export function setDynamicEq(params: DynamicEqParams): Promise<void> {
     links: dspState.links.map((item) =>
       item.name === "dynamic_eq"
         ? { ...item, dynamicEqParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setHarmonizer(params: HarmonizerParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "harmonizer"
+        ? { ...item, harmonizerParams: params }
         : item,
     ),
   };

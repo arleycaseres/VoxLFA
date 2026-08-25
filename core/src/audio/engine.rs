@@ -80,6 +80,12 @@ const ANALYSIS_CHANNEL_CAPACITY: usize = 64;
 /// y el hilo de denoise.
 const DENOISE_RING_CAPACITY: usize = 4096;
 
+/// Capacidad máxima preasignada para los buffers scratch del callback de audio
+/// (entrada denoise, salida denoise y salida de la cadena DSP). Se elige 4096
+/// (~85 ms a 48 kHz) para cubrir cualquier tamaño de buffer que un dispositivo
+/// USB genérico pueda entregar sin reasignar memoria en el callback.
+const SCRATCH_MAX: usize = 4096;
+
 /// Latencia reportada antes de que haya señal circulando.
 const LATENCY_UNKNOWN: f32 = 0.0;
 
@@ -321,9 +327,10 @@ impl AudioEngine {
         let stop_denoise = Arc::new(AtomicBool::new(false));
         let mut denoise_handle: Option<DenoiseHandle> = None;
 
-        // Buffers reutilizables para denoise en el callback.
-        let mut denoise_in_buf = Vec::with_capacity(max_frames);
-        let mut denoise_out_buf = Vec::with_capacity(max_frames);
+        // Buffers reutilizables para denoise en el callback (misma
+        // capacidad generosa que `scratch` para evitar reasignaciones).
+        let mut denoise_in_buf = vec![0.0f32; SCRATCH_MAX];
+        let mut denoise_out_buf = vec![0.0f32; SCRATCH_MAX];
 
         // Ring buffers para comunicación callback ↔ hilo de denoise.
         // Siempre se crean (el callback los ignora si no hay hilo).
@@ -357,9 +364,12 @@ impl AudioEngine {
         let mut level_meter = LevelMeter::new();
         let mut output_meter = LevelMeter::new();
         let mut chain = initial_chain;
-        // Buffer reutilizable para la salida de la cadena DSP (sin asignar por
-        // callback).
-        let mut scratch = Vec::with_capacity(max_frames);
+        // Buffer reutilizable para la salida de la cadena DSP. Se
+        // preasigna con capacidad generosa (SCRATCH_MAX ≈ 85 ms a 48 kHz)
+        // para no reasignar si el dispositivo USB entrega callbacks más
+        // grandes que el buffer nominal. La longitud real se ajusta con
+        // `truncate` y `resize` solo crece si es estrictamente necesario.
+        let mut scratch = vec![0.0f32; SCRATCH_MAX];
         let mut last_emit = Instant::now();
         let mut overrun_warned = false;
         let tx_capture = tx.clone();
@@ -434,11 +444,20 @@ impl AudioEngine {
                             DspCommand::SetLinkDynamicEq { processor, params } => {
                                 chain.set_link_dynamic_eq(processor, params);
                             }
+                            DspCommand::SetLinkHarmonizer { processor, params } => {
+                                chain.set_link_harmonizer(processor, params);
+                            }
                         }
                     }
 
                     // 1) Cadena DSP: offloaded denoise o procesamiento inline.
-                    scratch.resize(samples.len(), 0.0);
+                    // Ajustar la longitud de scratch sin reasignar (la
+                    // capacidad preasignada es suficiente para cualquier
+                    // buffer de callback normal).
+                    if samples.len() > scratch.len() {
+                        scratch.resize(samples.len(), 0.0);
+                    }
+                    scratch.truncate(samples.len());
                     let info = ProcessingInfo {
                         sample_rate,
                         frames: samples.len(),
@@ -447,14 +466,20 @@ impl AudioEngine {
                     if chain.has_denoise() && denoise_handle.is_some() {
                         // --- Modo offloaded: denoise en hilo dedicado ---
                         // a) Procesar módulos pre-denoise (HighPass, etc.).
-                        denoise_in_buf.resize(samples.len(), 0.0);
+                        if samples.len() > denoise_in_buf.len() {
+                            denoise_in_buf.resize(samples.len(), 0.0);
+                        }
+                        denoise_in_buf.truncate(samples.len());
                         chain.process_pre_denoise(samples, &mut denoise_in_buf, &info);
 
                         // b) Enviar audio crudo al hilo de denoise.
                         let _ = denoise_in_prod.push_slice(&denoise_in_buf);
 
                         // c) Leer resultado denoiseado del ring de salida.
-                        denoise_out_buf.resize(samples.len(), 0.0);
+                        if samples.len() > denoise_out_buf.len() {
+                            denoise_out_buf.resize(samples.len(), 0.0);
+                        }
+                        denoise_out_buf.truncate(samples.len());
                         let n = denoise_out_cons.pop_slice(&mut denoise_out_buf);
 
                         // d) Mezclar seco/húmedo y procesar módulos post-denoise.
@@ -732,9 +757,11 @@ fn heuristic_buffer_size(input_name: &str, output_name: &str) -> usize {
         return 512;
     }
 
-    // Cualquier otro dispositivo USB no clasificado.
+    // Cualquier otro dispositivo USB no clasificado → 512 (más margen para
+    // evitar underruns con DSP activo; 256 era demasiado agresivo para
+    // codecs genéricos).
     if names.contains("usb") || names.contains("interface") {
-        return 256;
+        return 512;
     }
 
     // Predeterminado equilibrado para el resto (micrófonos integrados, etc.).
@@ -957,10 +984,15 @@ mod tests {
             512
         );
         assert_eq!(heuristic_buffer_size("BEHRINGER UMC 22", "USB Audio"), 512);
-        // USB genérico no clasificado → 256.
+        // USB genérico no clasificado → 512 (suficiente margen para
+        // codecs USB genéricos como "USB AUDIO CODEC").
         assert_eq!(
             heuristic_buffer_size("Micrófono (USB Audio)", "Altavoces (USB Audio)"),
-            256
+            512
+        );
+        assert_eq!(
+            heuristic_buffer_size("USB AUDIO CODEC", "USB AUDIO CODEC"),
+            512
         );
     }
 

@@ -24,6 +24,7 @@ import { DelayPanel } from "./components/DelayPanel";
 import { ReverbPanel } from "./components/ReverbPanel";
 import { SaturatorPanel } from "./components/SaturatorPanel";
 import { DynamicEqPanel } from "./components/DynamicEqPanel";
+import { HarmonizerPanel } from "./components/HarmonizerPanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
 import { FloatingSuggestion } from "./components/FloatingSuggestion";
 import { SpectrumView } from "./components/SpectrumView";
@@ -342,6 +343,13 @@ export default function App() {
             dsp={engine.dsp}
             running={running}
             onSetDynamicEq={(params) => void engine.setDynamicEq(params)}
+          />
+
+          <h2 className="panel__title panel__title--spaced">Harmonizer</h2>
+          <HarmonizerPanel
+            dsp={engine.dsp}
+            running={running}
+            onSetHarmonizer={(params) => void engine.setHarmonizer(params)}
           />
 
           {engine.error && <p className="controls__error">{engine.error}</p>}

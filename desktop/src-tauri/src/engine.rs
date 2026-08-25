@@ -518,6 +518,18 @@ impl EngineManager {
         Ok(())
     }
 
+    pub fn set_harmonizer(
+        &mut self,
+        params: voxlfa_core::protocol::HarmonizerParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_harmonizer(params.clone())?;
+        self.update_current_profile(|profile| {
+            profile.harmonizer_params = Some(params);
+        });
+        Ok(())
+    }
+
     /// Aplica un cambio al perfil del dispositivo en uso, si el motor corre.
     fn update_current_profile(
         &mut self,

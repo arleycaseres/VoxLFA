@@ -4,13 +4,18 @@ VoxLFA es un **procesador vocal en tiempo real** con IA. La Fase 0 entregó la
 base (motor de audio de baja latencia, cabina de escritorio y monitor móvil
 remoto); la **Fase 1** añade el DSP real: una cadena encadenable de módulos
 vocal (EQ, compresor, de-esser, saturación, delay, reverb, limiter, pasa-altos,
-ganancia) con presets aplicables en vivo, bypass por módulo y global, y niveles
+ganancia) con presets aplicables en vivo, bypass por módulo o global, y niveles
 de salida pre/post. La **Fase 1.1** añade el ajuste fino del ecualizador por
 banda (sliders en vivo). La **Fase 1.2** añade la **puerta de ruido**
 configurable: umbral, ataque, liberación, *hold* y rango, con ajuste en vivo y
 persistencia por dispositivo. La **Fase 2** añade el asistente vocal local:
 análisis de la voz en vivo (sin FFT ni nube), sugerencias accionables con
-confirmación y resumen de sesión exportable.
+confirmación y resumen de sesión exportable. La **Fase 9** lleva delay y reverb
+a nivel de concierto (multi-modo, pre-delay, ducking, filtros). Las **Fase 10**
+y **11** añaden saturación multi-modo (Tube/Tape/TubeTape), dynamic EQ
+(compresión por banda), supresión de feedback adaptativa FIR (NLMS), harmonizer
+vocal (delay-lines con crossfade), presets Monitor/FOH, y enrutamiento
+send/Return para efectos de tiempo en paralelo.
 
 ## Principios
 
@@ -52,7 +57,10 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
   conecta captura → salida mediante un **ring buffer lock-free** (`ringbuf`)
   y mide la latencia como el tiempo que tarda cada muestra en recorrerlo. El
   tamaño de buffer es configurable; si no se pide, lo elige una **heurística
-  por dispositivo** (USB → 128, Bluetooth/HDMI → 1024, resto → 256).
+  por dispositivo** (USB profesional → 128, USB genérico/budget → 512,
+  Bluetooth/HDMI → 1024, resto → 256). Los buffers internos del callback
+  (`scratch`, `denoise_in_buf`, `denoise_out_buf`) se preasignan con 4096
+  muestras (~85 ms a 48 kHz) para evitar reasignaciones en el hot-path.
 - `audio::EngineHandle`: control asíncrono del motor (`request_stop`,
   `join`) sin tocar los streams desde fuera del hilo de audio.
 - `dsp`: trait `AudioProcessor` + procesadores reales:
@@ -62,34 +70,62 @@ El motor de audio y, en fases futuras, el DSP y la IA. Publica:
   - **Dinámica**: `Compressor` (envolvente pico, ganancia suavizada en dB),
     `DeEsser` (banda de 6 kHz con envolvente), `Limiter` (con lookahead),
     `BoomSuppressor` (reducción dinámica de la banda baja-media ~200–300 Hz).
+  - **Supresión de feedback**: `FeedbackSuppressor` con dos modos:
+    - **Notch** (clásico): FFT 2048 puntos, detección de picos por umbral,
+      hasta 4 filtros muesca adaptativos con ataque/liberación suavizados.
+    - **Adaptive** (FIR NLMS): filtro FIR adaptativo que estima la ruta de
+      feedback (altavoz → micrófono) y la cancela por sustracción. Requiere la
+      señal de salida del bloque anterior (`set_output_reference()`). Convergencia
+      controlada (límite de divergencia, energía mínima de referencia).
   - **Puerta de ruido**: `NoiseGate` (Fase 1.2) con umbral, ataque, liberación,
     *hold* y rango; envolvente pico con ataque/liberación por muestra, decisión
     abierta/cerrada con *hold* y ganancia suavizada en dB (sin *zipper noise*).
     Arranca cerrada y no asigna memoria en el callback. Va tras el pasa-altos en
     los presets de voz.
-  - **Tiempo/color**: `Saturator` (tanh), `Delay` (multi-modo: Digital, Analog,
-    Tape, Slapback; con pre-delay, filtros HP/LP en wet, ducking con envelope
-    follower), `Reverb` (multi-modo: Plate, Hall, Room; con pre-delay, filtros
-    HP/LP en return, `ReverbTopology` por modo), `Gain`,
+  - **Tiempo/color**: `Saturator` (multi-modo: Tube, Tape, TubeTape; con armónicos
+    pares dominantes, compresión suave y LP en modos Tape), `Delay` (multi-modo:
+    Digital, Analog, Tape, Slapback; con pre-delay, filtros HP/LP en wet, ducking
+    con envelope follower), `Reverb` (multi-modo: Plate, Hall, Room; con pre-delay,
+    filtros HP/LP en return, `ReverbTopology` por modo), `Gain`,
     `PassThroughProcessor`.
+  - **Dinámica por banda**: `DynamicEq` (compresión por banda de frecuencia:
+    extracción paralela con biquad pasabanda sidechain, detector de envolvente pico,
+    compresión con ratio/attack/release y ganancia de maquillaje; reconstrucción
+    `input + band × (gain - 1)` preserva frecuencias no afectadas).
+  - **Armónicos**: `Harmonizer` vocal con pitch shifter por delay-lines y
+    crossfade triangular. Soporta hasta 8 intervalos × 4 voces (32 pitch
+    shifters). Detuning ±5 cents entre copias para efecto coro.
   - **Cadena**: `ChainProcessor` encadena módulos en orden, mide latencia
-    acumulada y aplica bypass por módulo o global; `DspHandle` permite
-    reconfigurar en vivo (`DspCommand`: aplicar preset, bypass global, bypass
-    de módulo, reemplazo de módulo completo, `SetLinkDelay`, `SetLinkReverb`)
-    conmutando cadenas o procesadores preconstruidos en un hilo de control. El
-    **ajuste fino del EQ** (`DspHandle::set_eq_band`) reconstruye solo el
-    `ParametricEq` con la banda modificada y lo conmuta por puntero; las bandas
-    actuales viajan en el estado (`DspLinkState::eq_bands`). La **puerta de
-    ruido** se ajusta igual (`DspHandle::set_noise_gate`): reconstruye el
-    `NoiseGate` en el hilo de control y lo conmuta por puntero; los parámetros
-    viajan en `DspLinkState::gate_params`. El **delay** y **reverb** multi-modo
-    se ajustan con `DspHandle::set_delay()`/`set_reverb()`: reconstruyen el
-    procesador completo (cambia modo, tiempo, feedback, etc.) y lo conmutan por
-    puntero; los parámetros viajan en `DspLinkState::delay_params` y
-    `DspLinkState::reverb_params`.
-- `dsp::presets::PresetFactory`: `vozLimpia`, `radio` y `warm` (todas terminan
-  en un limiter de seguridad e incluyen antifeedback: pasa-altos + muesca y/o
-  supresión de *boominess*).
+    acumulada y aplica bypass por módulo o global. El **enrutamiento send/return**
+    detecta automáticamente el primer delay o reverb en la cadena (`send_start`) y
+    procesa los efectos de tiempo en **paralelo**: ambos reciben la misma señal
+    seca (post-compresor), procesan independientemente, y sus contribuciones
+    húmedas se suman (`output += effect_out - dry * (1 - mix)`). Esto evita que
+    el reverb procese las colas del delay (sonido embarrado). Los módulos
+    anteriores al primer efecto de tiempo se procesan en serial. `DspHandle`
+    permite reconfigurar en vivo (`DspCommand`: aplicar preset, bypass global,
+    bypass de módulo, reemplazo de módulo completo, `SetLinkDelay`,
+    `SetLinkReverb`, `SetLinkSaturator`, `SetLinkDynamicEq`,
+    `SetLinkHarmonizer`) conmutando cadenas o procesadores preconstruidos en un
+    hilo de control. El **ajuste fino del EQ** (`DspHandle::set_eq_band`)
+    reconstruye solo el `ParametricEq` con la banda modificada y lo conmuta por
+    puntero; las bandas actuales viajan en el estado (`DspLinkState::eq_bands`).
+    La **puerta de ruido** se ajusta igual (`DspHandle::set_noise_gate`):
+    reconstruye el `NoiseGate` en el hilo de control y lo conmuta por puntero; los
+    parámetros viajan en `DspLinkState::gate_params`. El **delay** y **reverb**
+    multi-modo se ajustan con `DspHandle::set_delay()`/`set_reverb()`:
+    reconstruyen el procesador completo (cambia modo, tiempo, feedback, etc.) y lo
+    conmutan por puntero; los parámetros viajan en `DspLinkState::delay_params` y
+    `DspLinkState::reverb_params`. El **saturador** se ajusta con
+    `set_saturator()` (cambia modo, drive, mix). El **dynamic eq** con
+    `set_dynamic_eq()` (reemplaza bandas). El **harmonizer** con
+    `set_harmonizer()` (cambia intervalos, mix, voces).
+- `dsp::presets::PresetFactory`: `dry`, `vozLimpia`, `radio`, `warm`,
+  `monitor` y `foh` (todas terminan en un limiter de seguridad e incluyen
+  antifeedback: pasa-altos + muesca y/o supresión de *boominess*). El preset
+  **monitor** omite delay y reverb (evita latencia en monitores de escenario);
+  el preset **foh** incluye la cadena completa (dynamic eq, saturador tube,
+  harmonizer, slapback delay, plate reverb).
 - `protocol`: contratos serde de eventos y comandos (ver `docs/protocolo.md`),
   incluida la especificación DSP (`protocol/dsp.rs`) que es la única fuente de
   configuración JSON, y el análisis vocal (`protocol/analysis.rs`).
@@ -143,9 +179,10 @@ Cáscara de escritorio que orquesta el core:
   ambiguos (`0/O`, `1/I/l`).
 - `src-tauri/src/tauri_app.rs` (feature `webview`): comandos expuestos a la UI,
   incluidos `apply_preset`, `set_global_bypass`, `set_link_bypass`,
-  `set_eq_band`, `set_noise_gate`, `set_delay` y `set_reverb`, que
-  reconfiguran la cadena DSP en vivo vía `EngineManager`, y los de análisis:
-  `get_analysis`, `get_session_summary` y `apply_suggestion`.
+  `set_eq_band`, `set_noise_gate`, `set_delay`, `set_reverb`, `set_saturator`,
+  `set_dynamic_eq` y `set_harmonizer`, que reconfiguran la cadena DSP en vivo
+  vía `EngineManager`, y los de análisis: `get_analysis`, `get_session_summary`
+  y `apply_suggestion`.
 
 La UI (React/TS) accede a Tauri **solo** a través de `src/lib/tauri.ts`; el
 estado se consume con el hook `useEngine` (que también replica la cabina con un
@@ -195,13 +232,15 @@ el escritorio ejecuta contra el motor; el resultado vuelve como evento `dsp`.
 La cadena no se toca desde el hilo de audio:
 
 1. La UI llama `apply_preset`/`set_*_bypass`/`set_eq_band`/`set_noise_gate`/
-   `set_delay`/`set_reverb` → `DspCommand` por canal mpsc.
-2. El hilo de control de `DspHandle` construye la cadena (o el módulo EQ/gate/
-   delay/reverb) nueva —aquí sí se puede asignar memoria— y la intercambia
-   atómicamente con la activa. Para el ajuste fino solo se reemplaza el
-   procesador del eslabón `eq` o `noisegate` (`SetLinkProcessor`/`SetLinkGate`),
-   sin reconstruir delay/reverb ni perder su estado. Para delay/reverb se
-   reconstruye el procesador completo (`SetLinkDelay`/`SetLinkReverb`).
+   `set_delay`/`set_reverb`/`set_saturator`/`set_dynamic_eq`/`set_harmonizer`
+   → `DspCommand` por canal mpsc.
+2. El hilo de control de `DspHandle` construye la cadena (o el módulo) nueva
+   —aquí sí se puede asignar memoria— y la intercambia atómicamente con la
+   activa. Para el ajuste fino solo se reemplaza el procesador del eslabón
+   (`SetLinkProcessor`/`SetLinkGate`), sin reconstruir delay/reverb ni perder
+   su estado. Para delay/reverb/saturador/dynamic_eq/harmonizer se reconstruye
+   el procesador completo (`SetLinkDelay`/`SetLinkReverb`/
+   `SetLinkSaturator`/`SetLinkDynamicEq`/`SetLinkHarmonizer`).
 3. El callback de audio solo ve el puntero nuevo en la siguiente iteración;
    actualiza `Arc<Mutex<DspState>>` y emite `EngineEvent::Dsp`.
 
@@ -273,6 +312,12 @@ es mínimo (la métrica real se lee en cada bloque).
 | Niveles con umbral y drenado por canal | Los callbacks nunca hacen trabajo lento |
 | Cadena conmutada por puntero (hilo de control) | Reconfiguración en vivo sin bloquear audio |
 | Reemplazo del módulo EQ solo (`SetLinkProcessor`) | Ajuste fino sin reconstruir la cadena entera ni perder el estado de reverb/delay |
+| Send/Return para delay+reverb (paralelo) | Evita que el reverb procese las colas del delay; ambos reciben la misma señal seca y sus contribuciones húmedas se suman |
+| Detección automática de send_start en ChainProcessor | El usuario no tiene que configurar nada; se detecta el primer delay/reverb y se procesa en paralelo |
+| `set_output_reference()` en AudioProcessor | Permite al feedback suppressor FIR (NLMS) recibir la señal de salida del bloque anterior para cancelar feedback |
+| FeedbackMode::Adaptive como default para presets en vivo | El modo FIR NLMS modela la ruta de feedback y la cancela de forma más efectiva que los notch estáticos |
+| Monitor sin delay/reverb | Elimina la latencia en monitores de escenario donde el audio se mezcla físicamente |
+| FOH con cadena completa | Incluye todos los efectos (dynamic eq, saturador, harmonizer, slapback, plate reverb) para el PA principal |
 | Bandas del EQ en el estado (`eqBands`) | La UI y el móvil ven la configuración real, no solo el preset |
 | Puerta de ruido como módulo DSP + `set_noise_gate` | Mismo patrón que el EQ fino: reconstrucción en el hilo de control, conmutación por puntero, estado en `gateParams` |
 | Parámetros del gate (umbral/ataque/liberación/hold/rango) por preset | Cada preset de voz trae una puerta ya afinada; `dry` no la incluye |

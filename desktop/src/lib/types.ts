@@ -70,7 +70,7 @@ export interface SpectrumSample {
 }
 
 /** Identificador de un preset de la cabina. */
-export type PresetId = "dry" | "vozLimpia" | "radio" | "warm";
+export type PresetId = "dry" | "vozLimpia" | "radio" | "warm" | "monitor" | "foh";
 
 /** Metadatos de un preset para mostrarlo en la cabina. */
 export interface PresetInfo {
@@ -269,6 +269,16 @@ export interface DynamicEqParams {
   bands: DynamicEqBandParams[];
 }
 
+/** Parámetros del harmonizer vocal. */
+export interface HarmonizerParams {
+  /** Intervalos en semitonos desde la nota original. */
+  intervals: number[];
+  /** Mezcla seco/húmedo (0–1). */
+  mix: number;
+  /** Número de copias por voz (1–4). */
+  voicesPerInterval: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   /** Nombre corto del módulo (identificador para el bypass). */
@@ -295,6 +305,8 @@ export interface DspLinkState {
   saturatorParams: SaturatorParams | null;
   /** Parámetros de EQ dinámico si este módulo es dynamic_eq; si no, `null`. */
   dynamicEqParams: DynamicEqParams | null;
+  /** Parámetros de harmonizer si este módulo es harmonizer; si no, `null`. */
+  harmonizerParams: HarmonizerParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -358,6 +370,8 @@ export interface DeviceProfile {
   saturatorParams?: SaturatorParams | null;
   /** Parámetros de EQ dinámico si se ajustaron en vivo. */
   dynamicEqParams?: DynamicEqParams | null;
+  /** Parámetros de harmonizer si se ajustaron en vivo. */
+  harmonizerParams?: HarmonizerParams | null;
   /** `true` si el bypass global estaba activo al guardar. */
   globalBypass: boolean;
   /** Bypass por módulo que estaba activo al guardar. */

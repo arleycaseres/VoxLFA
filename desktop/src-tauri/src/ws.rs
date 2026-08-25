@@ -291,6 +291,9 @@ fn execute_command(engine: &mut EngineManager, command: ControlCommand) -> Resul
         ControlCommand::SetDynamicEq { params } => {
             engine.set_dynamic_eq(params).map_err(|err| err.to_string())
         }
+        ControlCommand::SetHarmonizer { params } => {
+            engine.set_harmonizer(params).map_err(|err| err.to_string())
+        }
     }
 }
 

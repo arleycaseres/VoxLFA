@@ -20,6 +20,10 @@ pub enum PresetId {
     Radio,
     /// Warm: bajos suaves y presencia vocal.
     Warm,
+    /// Monitor: configuración para monitor de escenario (mínimo efectos).
+    Monitor,
+    /// FOH (Front of House): mezcla completa para el PA principal.
+    Foh,
 }
 
 impl std::fmt::Display for PresetId {
@@ -29,6 +33,8 @@ impl std::fmt::Display for PresetId {
             PresetId::VozLimpia => write!(f, "vozLimpia"),
             PresetId::Radio => write!(f, "radio"),
             PresetId::Warm => write!(f, "warm"),
+            PresetId::Monitor => write!(f, "monitor"),
+            PresetId::Foh => write!(f, "foh"),
         }
     }
 }
@@ -368,6 +374,28 @@ pub struct PitchCorrectionParams {
     pub mix: f32,
 }
 
+/// Parámetros del harmonizer vocal (espejo de `DspModuleKind::Harmonizer`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarmonizerParams {
+    /// Intervalos en semitonos desde la nota original.
+    pub intervals: Vec<i32>,
+    /// Mezcla seco/húmedo (0 = solo seco, 1 = harmonías a nivel completo).
+    pub mix: f32,
+    /// Número de copias por voz (1–4, mayor = más cuerpo pero más CPU).
+    pub voices_per_interval: u32,
+}
+
+impl Default for HarmonizerParams {
+    fn default() -> Self {
+        Self {
+            intervals: vec![-12, -5, 0, 5, 7, 12],
+            mix: 0.25,
+            voices_per_interval: 1,
+        }
+    }
+}
+
 /// Tipo de módulo de la cadena DSP con sus parámetros.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -537,6 +565,15 @@ pub enum DspModuleKind {
         /// Mezcla seco/húmedo (0 = seco, 1 = señal corregida completa).
         mix: f32,
     },
+    /// Harmonizer vocal: genera copias de la voz desplazadas por intervalos musicales.
+    Harmonizer {
+        /// Intervalos en semitonos desde la nota original (p. ej. [-12, -7, 0, 5, 7, 12]).
+        intervals: Vec<i32>,
+        /// Mezcla seco/húmedo (0 = solo seco, 1 = voces de harmonía a nivel completo).
+        mix: f32,
+        /// Número de copias por voz (1–4, mayor = más cuerpo pero más CPU).
+        voices_per_interval: u32,
+    },
 }
 
 /// Especificación de un módulo dentro de la cadena.
@@ -587,6 +624,9 @@ pub struct DspLinkState {
     /// Parámetros actuales de EQ dinámico si este módulo es dynamic_eq;
     /// `None` en los demás. Refleja los ajustes en vivo con `set_dynamic_eq`.
     pub dynamic_eq_params: Option<DynamicEqParams>,
+    /// Parámetros actuales de harmonizer si este módulo es harmonizer;
+    /// `None` en los demás. Refleja los ajustes en vivo con `set_harmonizer`.
+    pub harmonizer_params: Option<HarmonizerParams>,
 }
 
 /// Estado completo de la cadena DSP activa.

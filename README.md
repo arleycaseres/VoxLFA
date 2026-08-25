@@ -6,7 +6,12 @@ mejora la claridad vocal y corrige el tono — con latencia suficientemente baja
 para uso en directo (conciertos, iglesias, karaoke, streaming).
 
 100% software, corre local (sin depender de internet) y usa modelos de IA
-livianos en vez de solo DSP clásico.
+livianos en vez de solo DSP clásico. Incluye cadena DSP completa con 14
+módulos (EQ, compresor, de-esser, saturación multi-modo, dynamic EQ,
+harmonizer vocal, delay/reverb multi-modo con enrutamiento send/return,
+supresión de feedback adaptativa FIR, denoise ONNX, corrección de tono y
+limiter), 6 presets optimizados (Dry, VozLimpia, Radio, Warm, Monitor, FOH)
+y monitoreo remoto desde el móvil.
 
 ---
 
@@ -24,6 +29,35 @@ que se comunica con él. El móvil no duplica lógica de audio: se conecta al mo
 que corre en el escritorio.
 
 ## Cambios recientes
+
+### Harmonizer vocal, Presets Monitor/FOH y Send/Return (Fase 11) ✅
+
+- **Harmonizer**: genera harmonías vocales en tiempo real con pitch shifter por
+  delay-lines y crossfade triangular. Soporta hasta 8 intervalos × 4 voces.
+  Detuning ±5 cents para efecto coro. UI con presets (Octava, Quinta, Tercera),
+  mix slider y voices-per-interval (1–4).
+- **Presets Monitor y FOH**: Monitor sin delay/reverb (evita latencia en
+  escenario). FOH con cadena completa (dynamic eq, saturador, harmonizer,
+  slapback, plate reverb).
+- **Enrutamiento Send/Return**: delay y reverb procesan la misma señal seca en
+  paralelo, evitando que el reverb procese las colas del delay. Detección
+  automática del primer efecto de tiempo en la cadena.
+- **Fix freeze audio callback**: corregido el congelamiento progresivo causado
+  por (1) armónicos del harmonizer que reasignaban Vec en el hot-path, (2)
+  buffers USB genéricos demasiado pequeños (256→512) y (3) reasignaciones en
+  `scratch.resize()`/`denoise_in_buf.resize()`/`denoise_out_buf.resize()`
+  cuando el dispositivo entregaba callbacks más grandes que el nominal.
+  Buffers preasignados a 4096 (~85 ms a 48 kHz).
+
+### Saturación multi-modo, Dynamic EQ y Feedback FIR adaptativo (Fase 10) ✅
+
+- **Saturador**: 3 modos (Tube: armónicos pares, Tape: compresión suave +
+  LP, TubeTape: cascada). Drive, mix y filtros biquad en señal wet.
+- **Dynamic EQ**: compresión por banda de frecuencia. Extracción paralela con
+  biquad pasabanda sidechain, detector de envolvente pico, ratio/attack/release.
+- **Feedback FIR adaptativo (NLMS)**: modelo de la ruta de feedback
+  (altavoz → micrófono) con cancelación por sustración. Los presets en vivo
+  usan modo Adaptive; Radio usa Notch clásico.
 
 ### Efectos multi-modo profesionales (Fase 9) ✅
 
@@ -60,24 +94,27 @@ Delay y reverb multi-modo con calidad de concierto:
 ## Roadmap
 
 Ver [`docs/roadmap.md`](docs/roadmap.md) para el detalle completo por fases.
-Estado actual: **Fase 9 completada — Efectos multi-modo profesionales** (delay y
-reverb con calidad de concierto).
+Estado actual: **Fase 11 completada — Harmonizer, Presets Monitor/FOH,
+Send/Return FX routing**.
 
 - [x] Monorepo (`core` / `desktop` / `mobile`)
 - [x] Pipeline de audio: captura → cadena DSP → salida con medición de latencia
-- [x] Módulos DSP: EQ, compresor, de-esser, saturación, limiter
+- [x] Módulos DSP: EQ, compresor, de-esser, saturación multi-modo, limiter
+- [x] Dynamic EQ (compresión por banda de frecuencia)
+- [x] Harmonizer vocal (delay-lines con crossfade, detuning, múltiples voces)
 - [x] Delay multi-modo (Digital, Analog, Tape, Slapback) + ducking + pre-delay
 - [x] Reverb multi-modo (Plate, Hall, Room) + pre-delay
-- [x] Presets aplicables en vivo (Voz Limpia, Radio, Warm) con bypass por módulo
+- [x] Enrutamiento Send/Return (delay+reverb en paralelo)
+- [x] Presets aplicables en vivo (Dry, VozLimpia, Radio, Warm, Monitor, FOH) con bypass por módulo
 - [x] Denoise ONNX (DeepFilterNet3) offloaded a hilo dedicado
-- [x] Supresión de feedback adaptativa + boom suppressor
+- [x] Supresión de feedback adaptativa (FFT+Notch y FIR NLMS) + boom suppressor
 - [x] Corrección tono (YIN + PSOLA, escalas musicales)
 - [x] Asistente IA local (Groq/GPT-OSS-20B, sugerencias contextuales)
 - [x] Visualizador de espectro FFT (32 bandas logarítmicas)
-- [x] Persistencia por dispositivo (perfiles con EQ, gate, delay, reverb)
+- [x] Persistencia por dispositivo (perfiles con EQ, gate, delay, reverb, saturador, dynamic eq, harmonizer)
 - [x] Protocolo de comunicación core ↔ UI (incluido WebSocket para móvil)
 - [x] Emparejamiento móvil ↔ escritorio (WebSocket autenticado por token + QR)
-- [ ] Fase 10 — Efectos multi-modo: Feedback adaptativo mejorado (FIR), Dynamic EQ, Saturación multi-modo
+- [ ] Fase 12 — Módulo "Sculpt" (un solo control de tono), Aislamiento de voz en tiempo real
 
 ## Requisitos
 
@@ -107,8 +144,10 @@ cd desktop && npm run tauri dev
 
 Al iniciar la app verás el **instrumento de cabina**: el dial central muestra el
 nivel de entrada en tiempo real, los medidores muestran los niveles pre/post de
-la cadena, y el panel de presets te deja cambiar entre Voz Limpia, Radio y Warm
-(con bypass por módulo o global). El indicador de latencia (ms) te dice si el
+la cadena, y el panel de presets te deja cambiar entre Dry, VozLimpia, Radio,
+Warm, Monitor y FOH (con bypass por módulo o global). Paneles dedicados para
+ECUADOR, Puerta de ruido, Denoise, Feedback, Corrección de tono, Delay, Reverb,
+Saturador, Dynamic EQ y Harmonizer. El indicador de latencia (ms) te dice si el
 pipeline cumple el objetivo para uso en vivo. El código de emparejamiento se
 muestra en la esquina superior derecha.
 

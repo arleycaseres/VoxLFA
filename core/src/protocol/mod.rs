@@ -23,8 +23,9 @@ pub use control::ControlCommand;
 pub use dsp::{
     DelayMode, DelayParams, DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState,
     DynamicEqBandParams, DynamicEqParams, EqBand, EqBandKind, FeedbackMode,
-    FeedbackSuppressorParams, MusicalNote, MusicalScale, NoiseGateParams, PitchCorrectionParams,
-    PresetId, PresetInfo, ReverbMode, ReverbParams, SaturatorMode, SaturatorParams,
+    FeedbackSuppressorParams, HarmonizerParams, MusicalNote, MusicalScale, NoiseGateParams,
+    PitchCorrectionParams, PresetId, PresetInfo, ReverbMode, ReverbParams, SaturatorMode,
+    SaturatorParams,
 };
 pub use event::{
     AudioDeviceInfo, AudioHostInfo, EngineEvent, EngineState, EngineStatus, LevelSample,
