@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Panel de control de la puerta de ruido: umbral, ataque, liberación y rango.
 //
 // Cada cambio se aplica en vivo (`set_noise_gate`): el core reconstruye solo
@@ -33,7 +34,7 @@ interface GatePanelProps {
   onSetNoiseGate: (params: NoiseGateParams) => void;
 }
 
-export function GatePanel({ dsp, running, onSetNoiseGate }: GatePanelProps) {
+const GatePanel = memo(function GatePanel({ dsp, running, onSetNoiseGate }: GatePanelProps) {
   const gateLink = dsp?.links.find((link) => link.name === "noisegate") ?? null;
   const params = gateLink?.gateParams ?? null;
   const bypassed = (gateLink?.bypass ?? false) || (dsp?.globalBypass ?? false);
@@ -170,4 +171,6 @@ export function GatePanel({ dsp, running, onSetNoiseGate }: GatePanelProps) {
       </div>
     </div>
   );
-}
+});
+
+export { GatePanel };

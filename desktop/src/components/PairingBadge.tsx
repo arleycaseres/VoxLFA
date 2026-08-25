@@ -2,7 +2,7 @@
 // usuario conecte la app móvil de monitoreo remoto. Al hacer clic, muestra el
 // QR que la app móvil puede escanear para rellenar IP, puerto y código.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState , memo} from "react";
 import QRCode from "qrcode";
 import type { PairingInfo } from "../lib/tauri";
 
@@ -12,7 +12,7 @@ function pairingUrl(pairing: PairingInfo): string {
   return `ws://${host}:${pairing.port}/?token=${pairing.code}`;
 }
 
-export function PairingBadge({ pairing }: { pairing: PairingInfo | null }) {
+const PairingBadge = memo(function PairingBadge({ pairing }: { pairing: PairingInfo | null }) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
@@ -84,4 +84,6 @@ export function PairingBadge({ pairing }: { pairing: PairingInfo | null }) {
       )}
     </div>
   );
-}
+});
+
+export { PairingBadge };

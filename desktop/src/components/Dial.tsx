@@ -4,7 +4,7 @@
 // Ángulos medidos en grados en sentido horario desde las 12. La aguja barre
 // 270° desde abajo-izquierda (225°, -60 dB) hasta abajo-derecha (135°, 0 dB).
 
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import { levelColor } from "../lib/format";
 import "./Dial.css";
 
@@ -53,7 +53,7 @@ interface DialProps {
   size?: number;
 }
 
-export function Dial({ peakDb, rmsDb, label = "dBFS", size = 320 }: DialProps) {
+const Dial = memo(function Dial({ peakDb, rmsDb, label = "dBFS", size = 320 }: DialProps) {
   const baseSize = size;
   const cx = baseSize / 2;
   const cy = baseSize / 2;
@@ -153,4 +153,6 @@ export function Dial({ peakDb, rmsDb, label = "dBFS", size = 320 }: DialProps) {
       </div>
     </div>
   );
-}
+});
+
+export { Dial };

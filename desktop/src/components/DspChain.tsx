@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Panel de la cadena DSP: módulos del preset activo con bypass por módulo.
 //
 // Muestra la señal fluyendo por los módulos (desde la entrada) y permite
@@ -51,7 +52,7 @@ interface DspChainProps {
   onLinkBypass: (link: string, bypass: boolean) => void;
 }
 
-export function DspChain({ dsp, onGlobalBypass, onLinkBypass }: DspChainProps) {
+const DspChain = memo(function DspChain({ dsp, onGlobalBypass, onLinkBypass }: DspChainProps) {
   const running = dsp !== null;
 
   return (
@@ -134,4 +135,6 @@ export function DspChain({ dsp, onGlobalBypass, onLinkBypass }: DspChainProps) {
       )}
     </div>
   );
-}
+});
+
+export { DspChain };

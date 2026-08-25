@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Selector de tamaño de buffer (latencia vs estabilidad).
 //
 // A menor buffer, menor latencia pero mayor riesgo de *underruns*; el valor
@@ -12,7 +13,7 @@ interface BufferSelectorProps {
 
 const BUFFER_OPTIONS = [64, 128, 256, 512, 1024];
 
-export function BufferSelector({ value, onChange, disabled }: BufferSelectorProps) {
+const BufferSelector = memo(function BufferSelector({ value, onChange, disabled }: BufferSelectorProps) {
   return (
     <label className="select">
       <span className="select__label">Buffer (latencia)</span>
@@ -34,4 +35,6 @@ export function BufferSelector({ value, onChange, disabled }: BufferSelectorProp
       </select>
     </label>
   );
-}
+});
+
+export { BufferSelector };

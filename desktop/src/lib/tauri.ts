@@ -10,6 +10,8 @@ import * as mock from "./mock";
 import type {
   AnalysisSample,
   AppConfig,
+  CompressorParams,
+  DeEsserParams,
   DelayParams,
   DenoiseParams,
   DeviceList,
@@ -208,6 +210,16 @@ export function setDynamicEq(params: DynamicEqParams): Promise<void> {
 /** Ajusta los parámetros del harmonizer en vivo. */
 export function setHarmonizer(params: HarmonizerParams): Promise<void> {
   return inTauri() ? invoke<void>("set_harmonizer", { params }) : mock.setHarmonizer(params);
+}
+
+/** Ajusta los parámetros del compresor en vivo. */
+export function setCompressor(params: CompressorParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_compressor", { params }) : mock.setCompressor(params);
+}
+
+/** Ajusta los parámetros del de-esser en vivo. */
+export function setDeEsser(params: DeEsserParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_de_esser", { params }) : mock.setDeEsser(params);
 }
 
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */

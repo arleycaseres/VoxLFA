@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { DspState, ReverbParams, ReverbMode } from "../lib/types";
 
 const ROOM_MIN = 0;
@@ -28,7 +29,7 @@ interface ReverbPanelProps {
   onSetReverb: (params: ReverbParams) => void;
 }
 
-export function ReverbPanel({ dsp, running, onSetReverb }: ReverbPanelProps) {
+const ReverbPanel = memo(function ReverbPanel({ dsp, running, onSetReverb }: ReverbPanelProps) {
   const link = dsp?.links.find((l) => l.name === "reverb") ?? null;
   const params = link?.reverbParams ?? null;
   const bypassed = (link?.bypass ?? false) || (dsp?.globalBypass ?? false);
@@ -228,4 +229,6 @@ export function ReverbPanel({ dsp, running, onSetReverb }: ReverbPanelProps) {
       </div>
     </div>
   );
-}
+});
+
+export { ReverbPanel };

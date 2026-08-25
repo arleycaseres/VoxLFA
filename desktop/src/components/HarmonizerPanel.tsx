@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState , memo} from "react";
 import type { DspState, HarmonizerParams } from "../lib/types";
 
 const MIX_MIN = 0;
@@ -21,7 +21,7 @@ interface HarmonizerPanelProps {
   onSetHarmonizer: (params: HarmonizerParams) => void;
 }
 
-export function HarmonizerPanel({
+const HarmonizerPanel = memo(function HarmonizerPanel({
   dsp,
   running,
   onSetHarmonizer,
@@ -226,4 +226,6 @@ export function HarmonizerPanel({
       </div>
     </div>
   );
-}
+});
+
+export { HarmonizerPanel };

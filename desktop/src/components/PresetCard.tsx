@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Tarjeta de preset de efectos. Se pulsa para aplicar el preset a la cadena
 // DSP en vivo; el preset activo se resalta.
 
@@ -18,7 +19,7 @@ interface PresetCardProps {
   onSelect: () => void;
 }
 
-export function PresetCard({
+const PresetCard = memo(function PresetCard({
   id,
   name,
   description,
@@ -48,4 +49,6 @@ export function PresetCard({
       </div>
     </button>
   );
-}
+});
+
+export { PresetCard };

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { DspState, DynamicEqBandParams, DynamicEqParams } from "../lib/types";
 
 const FREQ_MIN = 50;
@@ -26,7 +27,7 @@ interface DynamicEqPanelProps {
   onSetDynamicEq: (params: DynamicEqParams) => void;
 }
 
-export function DynamicEqPanel({ dsp, running, onSetDynamicEq }: DynamicEqPanelProps) {
+const DynamicEqPanel = memo(function DynamicEqPanel({ dsp, running, onSetDynamicEq }: DynamicEqPanelProps) {
   const link = dsp?.links.find((l) => l.name === "dynamic_eq") ?? null;
   const params = link?.dynamicEqParams ?? null;
   const bypassed = (link?.bypass ?? false) || (dsp?.globalBypass ?? false);
@@ -231,4 +232,6 @@ export function DynamicEqPanel({ dsp, running, onSetDynamicEq }: DynamicEqPanelP
       </div>
     </div>
   );
-}
+});
+
+export { DynamicEqPanel };

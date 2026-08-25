@@ -104,6 +104,34 @@ pub struct DenoiseParams {
     pub mix: f32,
 }
 
+/// Parámetros del compresor (espejo de `DspModuleKind::Compressor`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompressorParams {
+    /// Umbral (dBFS) a partir del cual comprime.
+    pub threshold_db: f32,
+    /// Relación de compresión (n:1).
+    pub ratio: f32,
+    /// Tiempo de ataque (ms).
+    pub attack_ms: f32,
+    /// Tiempo de liberación (ms).
+    pub release_ms: f32,
+    /// Ganancia de maquillaje aplicada tras comprimir (dB).
+    pub makeup_db: f32,
+}
+
+/// Parámetros del de-esser (espejo de `DspModuleKind::DeEsser`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeEsserParams {
+    /// Umbral (dBFS) de activación.
+    pub threshold_db: f32,
+    /// Frecuencia central de la banda sibilante (Hz).
+    pub freq_hz: f32,
+    /// Cantidad de reducción (0 = ninguno, 1 = máximo).
+    pub amount: f32,
+}
+
 /// Modo de supresión de feedback.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -627,6 +655,12 @@ pub struct DspLinkState {
     /// Parámetros actuales de harmonizer si este módulo es harmonizer;
     /// `None` en los demás. Refleja los ajustes en vivo con `set_harmonizer`.
     pub harmonizer_params: Option<HarmonizerParams>,
+    /// Parámetros actuales del compresor si este módulo es compressor;
+    /// `None` en los demás. Refleja los ajustes en vivo con `set_compressor`.
+    pub compressor_params: Option<CompressorParams>,
+    /// Parámetros actuales del de-esser si este módulo es deesser;
+    /// `None` en los demás. Refleja los ajustes en vivo con `set_de_esser`.
+    pub de_esser_params: Option<DeEsserParams>,
 }
 
 /// Estado completo de la cadena DSP activa.

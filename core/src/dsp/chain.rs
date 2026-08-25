@@ -19,9 +19,10 @@ use crate::dsp::{
 };
 use crate::error::Error;
 use crate::protocol::{
-    DelayParams, DenoiseParams, DspLinkState, DspModuleKind, DspModuleSpec, DspState,
-    DynamicEqParams, EngineEvent, EqBand, FeedbackSuppressorParams, HarmonizerParams,
-    NoiseGateParams, PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams,
+    CompressorParams, DeEsserParams, DelayParams, DenoiseParams, DspLinkState, DspModuleKind,
+    DspModuleSpec, DspState, DynamicEqParams, EngineEvent, EqBand, FeedbackSuppressorParams,
+    HarmonizerParams, NoiseGateParams, PitchCorrectionParams, PresetId, ReverbParams,
+    SaturatorParams,
 };
 use crate::Result;
 
@@ -110,6 +111,10 @@ struct ChainLink {
     dynamic_eq_params: Option<DynamicEqParams>,
     /// Parámetros actuales de harmonizer si este eslabón es harmonizer; `None` si no.
     harmonizer_params: Option<HarmonizerParams>,
+    /// Parámetros actuales de compresor si este eslabón es compressor; `None` si no.
+    compressor_params: Option<CompressorParams>,
+    /// Parámetros actuales de de-esser si este eslabón es deesser; `None` si no.
+    de_esser_params: Option<DeEsserParams>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -180,6 +185,8 @@ impl ChainProcessor {
                 let saturator_params = saturator_params_of(&spec.kind);
                 let dynamic_eq_params = dynamic_eq_params_of(&spec.kind);
                 let harmonizer_params = harmonizer_params_of(&spec.kind);
+                let compressor_params = compressor_params_of(&spec.kind);
+                let de_esser_params = de_esser_params_of(&spec.kind);
                 ChainLink {
                     name: module_name(&spec.kind),
                     enabled: spec.enabled,
@@ -195,6 +202,8 @@ impl ChainProcessor {
                     saturator_params,
                     dynamic_eq_params,
                     harmonizer_params,
+                    compressor_params,
+                    de_esser_params,
                 }
             })
             .collect();
@@ -415,6 +424,38 @@ impl ChainProcessor {
         }
     }
 
+    /// Reemplaza el procesador de compresor de un eslabón (ajuste en vivo).
+    pub fn set_link_compressor(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: CompressorParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "compressor") {
+            Some(link) => {
+                link.processor = processor;
+                link.compressor_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Reemplaza el procesador de de-esser de un eslabón (ajuste en vivo).
+    pub fn set_link_de_esser(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: DeEsserParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "deesser") {
+            Some(link) => {
+                link.processor = processor;
+                link.de_esser_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -437,6 +478,8 @@ impl ChainProcessor {
                     saturator_params: link.saturator_params,
                     dynamic_eq_params: link.dynamic_eq_params.clone(),
                     harmonizer_params: link.harmonizer_params.clone(),
+                    compressor_params: link.compressor_params,
+                    de_esser_params: link.de_esser_params,
                 })
                 .collect(),
         }
@@ -805,6 +848,20 @@ pub enum DspCommand {
         /// Parámetros actuales de harmonizer para el estado de la cadena.
         params: HarmonizerParams,
     },
+    /// Reemplazar el procesador de compresor (ajuste en vivo).
+    SetLinkCompressor {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de compresor para el estado de la cadena.
+        params: CompressorParams,
+    },
+    /// Reemplazar el procesador de de-esser (ajuste en vivo).
+    SetLinkDeEsser {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de de-esser para el estado de la cadena.
+        params: DeEsserParams,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -852,6 +909,8 @@ impl DspHandle {
                     saturator_params: saturator_params_of(&spec.kind),
                     dynamic_eq_params: dynamic_eq_params_of(&spec.kind),
                     harmonizer_params: harmonizer_params_of(&spec.kind),
+                    compressor_params: compressor_params_of(&spec.kind),
+                    de_esser_params: de_esser_params_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -1171,6 +1230,56 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Ajusta los parámetros del compresor en vivo.
+    pub fn set_compressor(&self, params: CompressorParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "compressor")
+            .ok_or_else(|| Error::audio("el preset actual no tiene compresor"))?;
+        link.compressor_params = Some(params);
+
+        let processor = Compressor::new(
+            params.threshold_db,
+            params.ratio,
+            params.attack_ms,
+            params.release_ms,
+            params.makeup_db,
+            self.sample_rate,
+        );
+        self.send(DspCommand::SetLinkCompressor {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
+    /// Ajusta los parámetros del de-esser en vivo.
+    pub fn set_de_esser(&self, params: DeEsserParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "deesser")
+            .ok_or_else(|| Error::audio("el preset actual no tiene de-esser"))?;
+        link.de_esser_params = Some(params);
+
+        let processor = DeEsser::new(
+            params.threshold_db,
+            params.freq_hz,
+            params.amount,
+            self.sample_rate,
+        );
+        self.send(DspCommand::SetLinkDeEsser {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -1380,6 +1489,40 @@ fn harmonizer_params_of(kind: &DspModuleKind) -> Option<HarmonizerParams> {
             intervals: intervals.clone(),
             mix: *mix,
             voices_per_interval: *voices_per_interval,
+        }),
+        _ => None,
+    }
+}
+
+fn compressor_params_of(kind: &DspModuleKind) -> Option<CompressorParams> {
+    match kind {
+        DspModuleKind::Compressor {
+            threshold_db,
+            ratio,
+            attack_ms,
+            release_ms,
+            makeup_db,
+        } => Some(CompressorParams {
+            threshold_db: *threshold_db,
+            ratio: *ratio,
+            attack_ms: *attack_ms,
+            release_ms: *release_ms,
+            makeup_db: *makeup_db,
+        }),
+        _ => None,
+    }
+}
+
+fn de_esser_params_of(kind: &DspModuleKind) -> Option<DeEsserParams> {
+    match kind {
+        DspModuleKind::DeEsser {
+            threshold_db,
+            freq_hz,
+            amount,
+        } => Some(DeEsserParams {
+            threshold_db: *threshold_db,
+            freq_hz: *freq_hz,
+            amount: *amount,
         }),
         _ => None,
     }

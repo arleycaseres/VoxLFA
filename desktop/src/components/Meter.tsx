@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Medidor de barra vertical para niveles de audio (estilo cabina).
 //
 // Muestra un nivel dBFS con una barra segmentada y una marca flotante para el
@@ -25,7 +26,7 @@ interface MeterProps {
   label: string;
 }
 
-export function Meter({ valueDb, peakDb, label }: MeterProps) {
+const Meter = memo(function Meter({ valueDb, peakDb, label }: MeterProps) {
   const fill = fillPercent(valueDb);
   const hot = valueDb >= -6;
 
@@ -42,4 +43,6 @@ export function Meter({ valueDb, peakDb, label }: MeterProps) {
       <span className="meter__value">{valueDb <= -100 ? "-inf" : valueDb.toFixed(0)}</span>
     </div>
   );
-}
+});
+
+export { Meter };

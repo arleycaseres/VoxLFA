@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { DspState, SaturatorMode, SaturatorParams } from "../lib/types";
 
 const DRIVE_MIN = 0;
@@ -23,7 +24,7 @@ interface SaturatorPanelProps {
   onSetSaturator: (params: SaturatorParams) => void;
 }
 
-export function SaturatorPanel({ dsp, running, onSetSaturator }: SaturatorPanelProps) {
+const SaturatorPanel = memo(function SaturatorPanel({ dsp, running, onSetSaturator }: SaturatorPanelProps) {
   const link = dsp?.links.find((l) => l.name === "saturator") ?? null;
   const params = link?.saturatorParams ?? null;
   const bypassed = (link?.bypass ?? false) || (dsp?.globalBypass ?? false);
@@ -130,4 +131,6 @@ export function SaturatorPanel({ dsp, running, onSetSaturator }: SaturatorPanelP
       </div>
     </div>
   );
-}
+});
+
+export { SaturatorPanel };

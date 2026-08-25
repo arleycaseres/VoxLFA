@@ -245,6 +245,30 @@ export interface SaturatorParams {
   mix: number;
 }
 
+/** Parámetros del compresor (espejo de `core/src/protocol/dsp.rs`). */
+export interface CompressorParams {
+  /** Umbral (dBFS) a partir del cual comprime. */
+  thresholdDb: number;
+  /** Relación de compresión (n:1). */
+  ratio: number;
+  /** Tiempo de ataque (ms). */
+  attackMs: number;
+  /** Tiempo de liberación (ms). */
+  releaseMs: number;
+  /** Ganancia de maquillaje aplicada tras comprimir (dB). */
+  makeupDb: number;
+}
+
+/** Parámetros del de-esser (espejo de `core/src/protocol/dsp.rs`). */
+export interface DeEsserParams {
+  /** Umbral (dBFS) de activación. */
+  thresholdDb: number;
+  /** Frecuencia central de la banda sibilante (Hz). */
+  freqHz: number;
+  /** Cantidad de reducción (0 = ninguno, 1 = máximo). */
+  amount: number;
+}
+
 /** Parámetros de una banda del EQ dinámico. */
 export interface DynamicEqBandParams {
   /** Frecuencia central de la banda (Hz). */
@@ -307,6 +331,10 @@ export interface DspLinkState {
   dynamicEqParams: DynamicEqParams | null;
   /** Parámetros de harmonizer si este módulo es harmonizer; si no, `null`. */
   harmonizerParams: HarmonizerParams | null;
+  /** Parámetros del compresor si este módulo es compressor; si no, `null`. */
+  compressorParams: CompressorParams | null;
+  /** Parámetros del de-esser si este módulo es deesser; si no, `null`. */
+  deEsserParams: DeEsserParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */

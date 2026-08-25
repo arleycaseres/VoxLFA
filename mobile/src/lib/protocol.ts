@@ -189,6 +189,30 @@ export interface HarmonizerParams {
   voicesPerInterval: number;
 }
 
+/** Parámetros del compresor. */
+export interface CompressorParams {
+  /** Umbral (dBFS) a partir del cual comprime. */
+  thresholdDb: number;
+  /** Relación de compresión (n:1). */
+  ratio: number;
+  /** Tiempo de ataque (ms). */
+  attackMs: number;
+  /** Tiempo de liberación (ms). */
+  releaseMs: number;
+  /** Ganancia de maquillaje (dB). */
+  makeupDb: number;
+}
+
+/** Parámetros del de-esser. */
+export interface DeEsserParams {
+  /** Umbral (dBFS) de activación. */
+  thresholdDb: number;
+  /** Frecuencia central de la banda sibilante (Hz). */
+  freqHz: number;
+  /** Cantidad de reducción (0–1). */
+  amount: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -214,6 +238,10 @@ export interface DspLinkState {
   dynamicEqParams: DynamicEqParams | null;
   /** Parámetros de harmonizer si este módulo es harmonizer; si no, `null`. */
   harmonizerParams: HarmonizerParams | null;
+  /** Parámetros del compresor si este módulo es compressor; si no, `null`. */
+  compressorParams: CompressorParams | null;
+  /** Parámetros del de-esser si este módulo es deesser; si no, `null`. */
+  deEsserParams: DeEsserParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -314,7 +342,9 @@ export type ControlCommand =
   | { type: "setReverb"; params: ReverbParams }
   | { type: "setSaturator"; params: SaturatorParams }
   | { type: "setDynamicEq"; params: DynamicEqParams }
-  | { type: "setHarmonizer"; params: HarmonizerParams };
+  | { type: "setHarmonizer"; params: HarmonizerParams }
+  | { type: "setCompressor"; params: CompressorParams }
+  | { type: "setDeEsser"; params: DeEsserParams };
 
 /**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).

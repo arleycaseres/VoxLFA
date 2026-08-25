@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { DspState, FeedbackMode, FeedbackSuppressorParams } from "../lib/types";
 
 const THRESHOLD_MIN = -60;
@@ -15,7 +16,7 @@ interface FeedbackPanelProps {
   onSetFeedback: (params: FeedbackSuppressorParams) => void;
 }
 
-export function FeedbackPanel({
+const FeedbackPanel = memo(function FeedbackPanel({
   dsp,
   running,
   onSetFeedback,
@@ -222,4 +223,6 @@ export function FeedbackPanel({
       </div>
     </div>
   );
-}
+});
+
+export { FeedbackPanel };

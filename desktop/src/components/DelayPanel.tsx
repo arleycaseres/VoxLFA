@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { DspState, DelayParams, DelayMode } from "../lib/types";
 
 const TIME_MIN = 1;
@@ -36,7 +37,7 @@ interface DelayPanelProps {
   onSetDelay: (params: DelayParams) => void;
 }
 
-export function DelayPanel({ dsp, running, onSetDelay }: DelayPanelProps) {
+const DelayPanel = memo(function DelayPanel({ dsp, running, onSetDelay }: DelayPanelProps) {
   const link = dsp?.links.find((l) => l.name === "delay") ?? null;
   const params = link?.delayParams ?? null;
   const bypassed = (link?.bypass ?? false) || (dsp?.globalBypass ?? false);
@@ -260,4 +261,6 @@ export function DelayPanel({ dsp, running, onSetDelay }: DelayPanelProps) {
       </div>
     </div>
   );
-}
+});
+
+export { DelayPanel };

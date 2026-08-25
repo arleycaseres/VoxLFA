@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Panel de control de corrección de tono: escala, nota raíz, intensidad y mezcla.
 //
 // Cada cambio se aplica en vivo (`set_pitch_correction`): el core reconstruye
@@ -48,7 +49,7 @@ interface PitchCorrectionPanelProps {
   onSetPitchCorrection: (params: PitchCorrectionParams) => void;
 }
 
-export function PitchCorrectionPanel({
+const PitchCorrectionPanel = memo(function PitchCorrectionPanel({
   dsp,
   running,
   onSetPitchCorrection,
@@ -224,4 +225,6 @@ export function PitchCorrectionPanel({
       </div>
     </div>
   );
-}
+});
+
+export { PitchCorrectionPanel };

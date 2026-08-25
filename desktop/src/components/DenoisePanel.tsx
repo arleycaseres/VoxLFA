@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Panel de control de supresión de ruido: slider de mezcla seco/húmedo.
 //
 // Cada cambio se aplica en vivo (`set_denoise`): el core reconstruye solo el
@@ -16,7 +17,7 @@ interface DenoisePanelProps {
   onSetDenoise: (params: DenoiseParams) => void;
 }
 
-export function DenoisePanel({ dsp, running, onSetDenoise }: DenoisePanelProps) {
+const DenoisePanel = memo(function DenoisePanel({ dsp, running, onSetDenoise }: DenoisePanelProps) {
   const denoiseLink = dsp?.links.find((link) => link.name === "denoise") ?? null;
   const params = denoiseLink?.denoiseParams ?? null;
   const bypassed = (denoiseLink?.bypass ?? false) || (dsp?.globalBypass ?? false);
@@ -86,4 +87,6 @@ export function DenoisePanel({ dsp, running, onSetDenoise }: DenoisePanelProps) 
       </div>
     </div>
   );
-}
+});
+
+export { DenoisePanel };

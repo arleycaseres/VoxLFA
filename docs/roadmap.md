@@ -504,11 +504,34 @@ dispositivos USB genéricos (ej. "USB AUDIO CODEC").
       48 kHz), `truncate` en callback, `resize` solo si estrictamente necesario.
 - [x] Verificación completa.
 
+## Fase 11.1 — UI Simple/Avanzada + live-tuning compresor y de-esser ✅
+
+Objetivo: organizar la interfaz en modo Simple (4 controles grandes) y
+Avanzado (acordeón por categoría), y habilitar el ajuste en vivo de compresor
+y de-esser desde la UI.
+
+- [x] **Modo Simple/Avanzado**: `SimplePanel.tsx` con 4 sliders grandes
+      (Claridad, Reducir ruido, Evitar pitidos, Volumen parejo) y mapeo
+      bidireccional a DSP; toggle en el header de `App.tsx`, persistencia en
+      `localStorage`.
+- [x] **Modo Avanzado acordeón**: 4 categorías (Básico, Dinámica, Efectos,
+      Creativos), una abierta a la vez, estado persistido en `localStorage`.
+- [x] **Live-tuning compresor/de-esser**: `CompressorParams` + `DeEsserParams`
+      structs en `core/src/protocol/dsp.rs`, `set_compressor` + `set_de_esser`
+      commands en `DspCommand`, métodos `set_compressor()` + `set_de_esser()` en
+      `DspHandle` y `ChainProcessor`, tauri commands registrados.
+- [x] **Protocolo sincronizado**: `compressorParams` y `deEsserParams` en
+      `DspLinkState` en los tres lados (Rust, desktop TS, mobile TS).
+- [x] Verificación completa (fmt, clippy, tests, build desktop, tsc mobile).
+
 > **Plan de fases** (actualizado):
 >
 > - **Fase 9** ✅: Delay + Reverb multi-modo
 > - **Fase 10** ✅: Saturación multi-modo, Dynamic EQ, Feedback FIR adaptativo
 > - **Fase 11** ✅: Harmonizer, Presets Monitor/FOH, Send/Return FX routing, Fix freeze audio callback
+> - **Fase 11.1** ✅: UI Simple/Avanzada, reorganización de paneles en categorías,
+>       live-tuning de compresor y de-esser, sincronización de protocolo en los
+>       tres lados (Rust, desktop, móvil)
 > - **Fase 12** (futuro): Módulo "Sculpt" (un solo control de tono),
 >       Aislamiento de voz en tiempo real, Corrección adaptativa de sala,
 >       Mejora vocal con IA

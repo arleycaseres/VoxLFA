@@ -3,7 +3,7 @@
 // Fase 2: asistente vocal local (análisis en vivo, sugerencias accionables con
 // confirmación y resumen de sesión exportable) sobre la cabina de la Fase 1.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useEngine } from "./hooks/useEngine";
 import type { UiSuggestion } from "./lib/uiTypes";
 import type { Suggestion as RawSuggestion } from "./lib/types";
@@ -15,6 +15,7 @@ import { StatusPill } from "./components/StatusPill";
 import { PairingBadge } from "./components/PairingBadge";
 import { PresetCard } from "./components/PresetCard";
 import { DspChain } from "./components/DspChain";
+import { SimplePanel } from "./components/SimplePanel";
 import { EqPanel } from "./components/EqPanel";
 import { GatePanel } from "./components/GatePanel";
 import { DenoisePanel } from "./components/DenoisePanel";
@@ -36,6 +37,16 @@ import "./styles/global.css";
 import "./App.css";
 import brandMark from "./assets/brand/brand_mark.png";
 import brandSecondary from "./assets/brand/brand_secondary.png";
+
+/** Categorías del acordeón en modo Avanzado. */
+type AccordionGroup = "basic" | "dynamics" | "effects" | "creative";
+
+const ACCORDION_GROUPS: { key: AccordionGroup; label: string }[] = [
+  { key: "basic", label: "Procesamiento básico" },
+  { key: "dynamics", label: "Dinámica" },
+  { key: "effects", label: "Efectos" },
+  { key: "creative", label: "Creativos" },
+];
 
 const IS_RUNNING = (state: string | null | undefined) => state === "running";
 
@@ -102,6 +113,29 @@ export default function App() {
     return localStorage.getItem("voxlfa:guideSeen") !== "1";
   });
 
+  // Modo de UI: "simple" (4 sliders) o "advanced" (panel completo).
+  const [uiMode, setUiMode] = useState<"simple" | "advanced">(() => {
+    const stored = localStorage.getItem("voxlfa:uiMode");
+    return stored === "advanced" ? "advanced" : "simple";
+  });
+  const toggleUiMode = () => {
+    const next = uiMode === "simple" ? "advanced" : "simple";
+    setUiMode(next);
+    localStorage.setItem("voxlfa:uiMode", next);
+  };
+
+  // Estado del acordeón en modo avanzado (una categoría abierta a la vez).
+  const [openAccordion, setOpenAccordion] = useState<AccordionGroup | null>(() => {
+    const stored = localStorage.getItem("voxlfa:accordionGroup");
+    return (stored as AccordionGroup) ?? "basic";
+  });
+  const toggleAccordion = (group: AccordionGroup) => {
+    const next = openAccordion === group ? null : group;
+    setOpenAccordion(next);
+    if (next) localStorage.setItem("voxlfa:accordionGroup", next);
+    else localStorage.removeItem("voxlfa:accordionGroup");
+  };
+
   // Precarga los selectores con la última selección persistida (si el
   // dispositivo sigue conectado). Solo la primera vez que hay config y lista.
   useEffect(() => {
@@ -160,6 +194,83 @@ export default function App() {
     localStorage.setItem("voxlfa:guideSeen", "1");
   };
 
+  // Callbacks estables para componentes memoizados (evitan re-renders).
+  const handleGlobalBypass = useCallback(
+    (bypass: boolean) => void engine.setGlobalBypass(bypass),
+    [engine.setGlobalBypass],
+  );
+  const handleLinkBypass = useCallback(
+    (link: string, bypass: boolean) => void engine.setLinkBypass(link, bypass),
+    [engine.setLinkBypass],
+  );
+  const handleSetEqBand = useCallback(
+    (index: number, gainDb: number) => void engine.setEqBand(index, gainDb),
+    [engine.setEqBand],
+  );
+  const handleSetNoiseGate = useCallback(
+    (params: Parameters<typeof engine.setNoiseGate>[0]) =>
+      void engine.setNoiseGate(params),
+    [engine.setNoiseGate],
+  );
+  const handleSetDenoise = useCallback(
+    (params: Parameters<typeof engine.setDenoise>[0]) =>
+      void engine.setDenoise(params),
+    [engine.setDenoise],
+  );
+  const handleSetFeedback = useCallback(
+    (params: Parameters<typeof engine.setFeedback>[0]) =>
+      void engine.setFeedback(params),
+    [engine.setFeedback],
+  );
+  const handleSetPitchCorrection = useCallback(
+    (params: Parameters<typeof engine.setPitchCorrection>[0]) =>
+      void engine.setPitchCorrection(params),
+    [engine.setPitchCorrection],
+  );
+  const handleSetDelay = useCallback(
+    (params: Parameters<typeof engine.setDelay>[0]) =>
+      void engine.setDelay(params),
+    [engine.setDelay],
+  );
+  const handleSetReverb = useCallback(
+    (params: Parameters<typeof engine.setReverb>[0]) =>
+      void engine.setReverb(params),
+    [engine.setReverb],
+  );
+  const handleSetSaturator = useCallback(
+    (params: Parameters<typeof engine.setSaturator>[0]) =>
+      void engine.setSaturator(params),
+    [engine.setSaturator],
+  );
+  const handleSetDynamicEq = useCallback(
+    (params: Parameters<typeof engine.setDynamicEq>[0]) =>
+      void engine.setDynamicEq(params),
+    [engine.setDynamicEq],
+  );
+  const handleSetHarmonizer = useCallback(
+    (params: Parameters<typeof engine.setHarmonizer>[0]) =>
+      void engine.setHarmonizer(params),
+    [engine.setHarmonizer],
+  );
+  const handleSetCompressor = useCallback(
+    (params: Parameters<typeof engine.setCompressor>[0]) =>
+      void engine.setCompressor(params),
+    [engine.setCompressor],
+  );
+  const handleSetDeEsser = useCallback(
+    (params: Parameters<typeof engine.setDeEsser>[0]) =>
+      void engine.setDeEsser(params),
+    [engine.setDeEsser],
+  );
+  const handleApplyPreset = useCallback(
+    (id: string) => void engine.applyPreset(id as import("./lib/types").PresetId),
+    [engine.applyPreset],
+  );
+  const handleApplySuggestion = useCallback(
+    (id: number) => void engine.applySuggestion(id),
+    [engine.applySuggestion],
+  );
+
   return (
     <div className="app">
       {/* Barra superior */}
@@ -177,6 +288,14 @@ export default function App() {
         <div className="app__header-right">
           <StatusPill state={engine.status?.state ?? null} />
           <PairingBadge pairing={engine.pairing} />
+          <button
+            type="button"
+            className={`btn btn--ghost btn--small ui-mode-toggle ${uiMode === "advanced" ? "ui-mode-toggle--active" : ""}`}
+            onClick={toggleUiMode}
+            aria-label={uiMode === "simple" ? "Cambiar a modo avanzado" : "Cambiar a modo simple"}
+          >
+            {uiMode === "simple" ? "Avanzado" : "Simple"}
+          </button>
           <button
             className="help-trigger"
             onClick={() => setShowGuide(true)}
@@ -263,7 +382,13 @@ export default function App() {
                   : engine.start(inputName, outputName, bufferSize)
               }
             >
-              {busy ? "…" : running ? "Detener" : "Arrancar"}
+              {!running && busy
+                ? "Abriendo…"
+                : running && busy
+                  ? "Deteniendo…"
+                  : running
+                    ? "Detener"
+                    : "Arrancar"}
             </button>
             <button
               type="button"
@@ -275,82 +400,83 @@ export default function App() {
             </button>
           </div>
 
-          <h2 className="panel__title panel__title--spaced">Cadena DSP</h2>
-          <DspChain
-            dsp={engine.dsp}
-            onGlobalBypass={(bypass) => void engine.setGlobalBypass(bypass)}
-            onLinkBypass={(link, bypass) => void engine.setLinkBypass(link, bypass)}
-          />
+          {uiMode === "simple" ? (
+            <SimplePanel
+              dsp={engine.dsp}
+              running={running}
+              onSetDenoise={handleSetDenoise}
+              onSetNoiseGate={handleSetNoiseGate}
+              onSetFeedback={handleSetFeedback}
+              onSetCompressor={handleSetCompressor}
+              onSetDeEsser={handleSetDeEsser}
+              onSetDynamicEq={handleSetDynamicEq}
+              onSetEqBand={handleSetEqBand}
+              onSetLinkBypass={handleLinkBypass}
+            />
+          ) : (
+            <>
+              <h2 className="panel__title panel__title--spaced">Cadena DSP</h2>
+              <DspChain
+                dsp={engine.dsp}
+                onGlobalBypass={handleGlobalBypass}
+                onLinkBypass={handleLinkBypass}
+              />
 
-          <h2 className="panel__title panel__title--spaced">Ecualizador</h2>
-          <EqPanel
-            dsp={engine.dsp}
-            running={running}
-            onSetEqBand={(index, gainDb) => void engine.setEqBand(index, gainDb)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">Puerta de ruido</h2>
-          <GatePanel
-            dsp={engine.dsp}
-            running={running}
-            onSetNoiseGate={(params) => void engine.setNoiseGate(params)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">Supresión de ruido</h2>
-          <DenoisePanel
-            dsp={engine.dsp}
-            running={running}
-            onSetDenoise={(params) => void engine.setDenoise(params)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">Antifeedback</h2>
-          <FeedbackPanel
-            dsp={engine.dsp}
-            running={running}
-            onSetFeedback={(params) => void engine.setFeedback(params)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">Corrección tono</h2>
-          <PitchCorrectionPanel
-            dsp={engine.dsp}
-            running={running}
-            onSetPitchCorrection={(params) => void engine.setPitchCorrection(params)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">Delay</h2>
-          <DelayPanel
-            dsp={engine.dsp}
-            running={running}
-            onSetDelay={(params) => void engine.setDelay(params)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">Reverb</h2>
-          <ReverbPanel
-            dsp={engine.dsp}
-            running={running}
-            onSetReverb={(params) => void engine.setReverb(params)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">Saturación</h2>
-          <SaturatorPanel
-            dsp={engine.dsp}
-            running={running}
-            onSetSaturator={(params) => void engine.setSaturator(params)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">EQ Dinámico</h2>
-          <DynamicEqPanel
-            dsp={engine.dsp}
-            running={running}
-            onSetDynamicEq={(params) => void engine.setDynamicEq(params)}
-          />
-
-          <h2 className="panel__title panel__title--spaced">Harmonizer</h2>
-          <HarmonizerPanel
-            dsp={engine.dsp}
-            running={running}
-            onSetHarmonizer={(params) => void engine.setHarmonizer(params)}
-          />
+              {ACCORDION_GROUPS.map(({ key, label }) => (
+                <div key={key} className="accordion">
+                  <button
+                    type="button"
+                    className={`accordion__header ${openAccordion === key ? "accordion__header--open" : ""}`}
+                    onClick={() => toggleAccordion(key)}
+                    aria-expanded={openAccordion === key}
+                  >
+                    <span>{label}</span>
+                    <span className="accordion__chevron">{openAccordion === key ? "▾" : "▸"}</span>
+                  </button>
+                  {openAccordion === key && (
+                    <div className="accordion__body">
+                      {key === "basic" && (
+                        <>
+                          <h3 className="panel__subtitle">Ecualizador</h3>
+                          <EqPanel dsp={engine.dsp} running={running} onSetEqBand={handleSetEqBand} />
+                          <h3 className="panel__subtitle">Puerta de ruido</h3>
+                          <GatePanel dsp={engine.dsp} running={running} onSetNoiseGate={handleSetNoiseGate} />
+                          <h3 className="panel__subtitle">Supresión de ruido</h3>
+                          <DenoisePanel dsp={engine.dsp} running={running} onSetDenoise={handleSetDenoise} />
+                          <h3 className="panel__subtitle">Antifeedback</h3>
+                          <FeedbackPanel dsp={engine.dsp} running={running} onSetFeedback={handleSetFeedback} />
+                        </>
+                      )}
+                      {key === "dynamics" && (
+                        <>
+                          <h3 className="panel__subtitle">EQ Dinámico</h3>
+                          <DynamicEqPanel dsp={engine.dsp} running={running} onSetDynamicEq={handleSetDynamicEq} />
+                          <h3 className="panel__subtitle">Corrección tono</h3>
+                          <PitchCorrectionPanel dsp={engine.dsp} running={running} onSetPitchCorrection={handleSetPitchCorrection} />
+                        </>
+                      )}
+                      {key === "effects" && (
+                        <>
+                          <h3 className="panel__subtitle">Delay</h3>
+                          <DelayPanel dsp={engine.dsp} running={running} onSetDelay={handleSetDelay} />
+                          <h3 className="panel__subtitle">Reverb</h3>
+                          <ReverbPanel dsp={engine.dsp} running={running} onSetReverb={handleSetReverb} />
+                          <h3 className="panel__subtitle">Saturación</h3>
+                          <SaturatorPanel dsp={engine.dsp} running={running} onSetSaturator={handleSetSaturator} />
+                        </>
+                      )}
+                      {key === "creative" && (
+                        <>
+                          <h3 className="panel__subtitle">Harmonizer</h3>
+                          <HarmonizerPanel dsp={engine.dsp} running={running} onSetHarmonizer={handleSetHarmonizer} />
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
 
           {engine.error && <p className="controls__error">{engine.error}</p>}
           {engine.warning && <p className="controls__warning">{engine.warning}</p>}
@@ -438,7 +564,7 @@ export default function App() {
                 accent={preset.id === "radio" ? "orange" : "cyan"}
                 active={engine.dsp?.preset === preset.id}
                 disabled={!running}
-                onSelect={() => void engine.applyPreset(preset.id)}
+                onSelect={() => void handleApplyPreset(preset.id)}
               />
             ))}
           </div>
@@ -448,7 +574,7 @@ export default function App() {
             analysis={engine.analysis}
             running={running}
             sessionSummary={engine.sessionSummary}
-            onApplySuggestion={(id) => void engine.applySuggestion(id)}
+            onApplySuggestion={handleApplySuggestion}
             onRefreshSummary={() => void engine.refreshSessionSummary()}
             aiSuggestions={engine.aiSuggestions}
             aiLoading={engine.aiLoading}

@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Selector de dispositivo de audio con opción "Predeterminado".
 //
 // Presenta los dispositivos detectados; si el backend informa el predeterminado
@@ -14,7 +15,7 @@ interface DeviceSelectorProps {
   disabled?: boolean;
 }
 
-export function DeviceSelector({
+const DeviceSelector = memo(function DeviceSelector({
   label,
   devices,
   value,
@@ -42,4 +43,6 @@ export function DeviceSelector({
       </select>
     </label>
   );
-}
+});
+
+export { DeviceSelector };

@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Píldora de estado del motor: color y texto según el estado actual.
 
 import type { EngineState } from "../lib/types";
@@ -10,7 +11,7 @@ const STATE_TEXT: Record<EngineState, string> = {
   error: "ERROR",
 };
 
-export function StatusPill({ state }: { state: EngineState | null }) {
+const StatusPill = memo(function StatusPill({ state }: { state: EngineState | null }) {
   const current = state ?? "stopped";
   return (
     <span className={`pill pill--${current}`} role="status">
@@ -18,4 +19,6 @@ export function StatusPill({ state }: { state: EngineState | null }) {
       {STATE_TEXT[current]}
     </span>
   );
-}
+});
+
+export { StatusPill };

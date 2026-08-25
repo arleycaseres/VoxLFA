@@ -5,7 +5,7 @@
 // El motor ya suaviza los niveles (ataque rápido / release en dB); aquí solo se
 // refleja la última muestra en cada fotograma.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, memo } from "react";
 import type { SpectrumSample } from "../lib/types";
 import { SPECTRUM_BIN_COUNT } from "../lib/types";
 import "./SpectrumView.css";
@@ -43,7 +43,7 @@ interface SpectrumViewProps {
   spectrum: SpectrumSample | null;
 }
 
-export function SpectrumView({ spectrum }: SpectrumViewProps) {
+const SpectrumView = memo(function SpectrumView({ spectrum }: SpectrumViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const spectrumRef = useRef<SpectrumSample | null>(spectrum);
@@ -176,4 +176,6 @@ export function SpectrumView({ spectrum }: SpectrumViewProps) {
       <canvas className="spectrum__canvas" ref={canvasRef} />
     </div>
   );
-}
+});
+
+export { SpectrumView };

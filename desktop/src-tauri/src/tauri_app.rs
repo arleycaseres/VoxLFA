@@ -3,7 +3,9 @@
 //! Define el estado global, los comandos que la UI invoca y el arranque de la
 //! ventana. No hay lógica de audio aquí: solo orquestación.
 
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 use log::info;
 use once_cell::sync::Lazy;
@@ -18,7 +20,7 @@ use voxlfa_core::protocol::{
 };
 use voxlfa_core::telemetry;
 
-use crate::engine::EngineManager;
+use crate::engine::{EngineManager, FrontendCallback, PendingStart};
 use crate::mdns::MdnsAdvertiser;
 use crate::pairing::{PairingState, DEFAULT_CODE_LENGTH};
 use crate::ws::run_ws_server;
@@ -45,6 +47,11 @@ const EVENT_CHANNEL_CAPACITY: usize = 256;
 
 /// Capacidad del canal broadcast de códigos de emparejamiento rotados.
 const PAIRING_EVENT_CHANNEL_CAPACITY: usize = 8;
+
+/// Tiempo máximo de espera (segundos) para que el dispositivo de audio responda
+/// al abrir los streams cpal. Si se supera, se devuelve un error a la UI y el
+/// hilo de apertura queda descartado (limpia handles si ya había arrancado).
+const STARTUP_TIMEOUT_SECS: u64 = 5;
 
 /// Evento que la cabina escucha para refrescar el código de emparejamiento.
 pub const PAIRING_EVENT_NAME: &str = "pairing-event";
@@ -154,6 +161,12 @@ fn list_devices_for_host(host_id: String) -> Result<DeviceListResponse, String> 
 /// `buffer_size` (muestras/callback) es opcional: si es `None`, el core elige
 /// uno automáticamente según el tipo de dispositivo (heurística de latencia).
 /// `audio_host` permite elegir el backend de audio (p. ej. `"jack"`, `"alsa"`).
+///
+/// La apertura del dispositivo se ejecuta en un hilo separado sin mantener el
+/// lock de `EngineManager`, para que otros comandos (get_engine_status, etc.)
+/// no queden bloqueados si el hardware tarda o se cuelga. Si el dispositivo
+/// no responde en [`STARTUP_TIMEOUT_SECS`] segundos, se devuelve un error
+/// inmediato al usuario y el hilo de apertura queda descartado.
 #[tauri::command]
 fn start_engine(
     app: AppHandle,
@@ -163,26 +176,92 @@ fn start_engine(
     buffer_size: Option<usize>,
     audio_host: Option<String>,
 ) -> Result<(), String> {
-    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    const TIMEOUT_ERR: &str = "No se pudo abrir el dispositivo: no respondió a tiempo. \
+         El dispositivo puede estar ocupado o ser incompatible.";
 
-    // Reenviar cada evento del motor a la UI de la ventana.
-    let app_handle = app.clone();
-    let on_frontend = Some(move |event: &EngineEvent| {
-        let _ = app_handle.emit("engine-event", event);
-    });
+    // --- Fase 1: validar y preparar (bajo lock, operación rápida) -----------
+    let pending = {
+        let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
 
-    engine
-        .start(
-            AudioEngineConfig {
-                input_device,
-                output_device,
-                buffer_size,
-                audio_host,
-                ..Default::default()
-            },
-            on_frontend,
-        )
-        .map_err(|err| err.to_string())
+        let on_frontend = {
+            let app_handle = app.clone();
+            Some(Arc::new(move |event: &EngineEvent| {
+                let _ = app_handle.emit("engine-event", event);
+            }) as Arc<FrontendCallback>)
+        };
+
+        engine
+            .prepare_start(
+                AudioEngineConfig {
+                    input_device,
+                    output_device,
+                    buffer_size,
+                    audio_host,
+                    ..Default::default()
+                },
+                on_frontend,
+            )
+            .map_err(|err| err.to_string())?
+    };
+    // Lock liberado aquí: otros comandos pueden proceder.
+
+    // --- Fase 2: arranque bloqueante en hilo dedicado (sin lock) --------------
+    let engine_arc = state.engine.clone();
+    let (result_tx, result_rx) = mpsc::channel::<Result<(), String>>();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = cancel.clone();
+
+    std::thread::Builder::new()
+        .name("voxlfa-engine-start".to_string())
+        .spawn(move || {
+            let core_result =
+                voxlfa_core::audio::AudioEngine::start(pending.engine_config, pending.event_tx);
+
+            // Si alguien ya canceló (timeout o startup más reciente), limpiar.
+            if cancel_clone.load(Ordering::Relaxed) {
+                if let Ok((handle, dsp, analysis)) = core_result {
+                    drop(dsp);
+                    drop(analysis);
+                    handle.request_stop();
+                    let _ = handle.join();
+                }
+                return;
+            }
+
+            match core_result {
+                Ok((handle, dsp, analysis)) => {
+                    // Instalar handles bajo lock (operación rápida).
+                    match engine_arc.lock() {
+                        Ok(mut engine) => {
+                            engine.complete_start(pending, handle, dsp, analysis);
+                            let _ = result_tx.send(Ok(()));
+                        }
+                        Err(_) => {
+                            drop(dsp);
+                            drop(analysis);
+                            handle.request_stop();
+                            let _ = handle.join();
+                            let _ = result_tx.send(Err("engine lock poisoned".into()));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = result_tx.send(Err(e.to_string()));
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    // --- Fase 3: esperar con timeout -----------------------------------------
+    match result_rx.recv_timeout(Duration::from_secs(STARTUP_TIMEOUT_SECS)) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(_timeout) => {
+            // Señalar al hilo de apertura que descarte el resultado.
+            cancel.store(true, Ordering::Relaxed);
+            Err(TIMEOUT_ERR.into())
+        }
+    }
 }
 
 /// Detiene el motor de forma controlada.
@@ -392,6 +471,26 @@ fn set_harmonizer(
     engine.set_harmonizer(params).map_err(|err| err.to_string())
 }
 
+/// Ajusta los parámetros del compresor del preset activo en vivo.
+#[tauri::command]
+fn set_compressor(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::CompressorParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.set_compressor(params).map_err(|err| err.to_string())
+}
+
+/// Ajusta los parámetros del de-esser del preset activo en vivo.
+#[tauri::command]
+fn set_de_esser(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::DeEsserParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.set_de_esser(params).map_err(|err| err.to_string())
+}
+
 /// Pide sugerencias al asesor de IA (Groq) con las métricas actuales.
 ///
 /// Ejecuta la petición HTTP en un hilo bloqueante para no bloquear la UI.
@@ -563,6 +662,8 @@ pub fn run() {
             set_saturator,
             set_dynamic_eq,
             set_harmonizer,
+            set_compressor,
+            set_de_esser,
             request_ai_suggestions,
             get_ai_suggestions,
             get_config,

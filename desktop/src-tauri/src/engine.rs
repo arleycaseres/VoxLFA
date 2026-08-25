@@ -17,7 +17,7 @@ use std::thread;
 
 use tokio::sync::broadcast;
 use voxlfa_core::analysis::AnalysisHandle;
-use voxlfa_core::audio::{AudioEngine, AudioEngineConfig, DspHandle, EngineHandle};
+use voxlfa_core::audio::{AudioEngineConfig, DspHandle, EngineHandle};
 use voxlfa_core::config::{ConfigStore, DEFAULT_DEVICE_KEY};
 use voxlfa_core::dsp::PresetFactory;
 use voxlfa_core::protocol::{
@@ -58,6 +58,7 @@ pub struct EngineManager {
     /// Último estado de la cadena DSP conocido.
     dsp_state: Arc<Mutex<Option<DspState>>>,
     /// Emisor de eventos serializados (JSON) hacia el WebSocket.
+    #[allow(dead_code)] // Usado desde tauri_app.rs (feature webview).
     events: broadcast::Sender<String>,
     /// Configuración persistente (config.json del usuario).
     config: ConfigStore,
@@ -70,6 +71,41 @@ pub struct EngineManager {
     session_timer: Option<SessionTimer>,
     /// Preset activo al arrancar la sesión (para el evento `SessionEnded`).
     session_preset: Option<PresetId>,
+}
+
+/// Datos capturados por `prepare_start()` para completar el arranque en un
+/// hilo separado sin mantener tomado el lock de `EngineManager`.
+///
+/// Solo se usa desde `tauri_app.rs` (feature `webview`).
+#[allow(dead_code)]
+pub(crate) struct PendingStart {
+    /// Configuración para `AudioEngine::start()` (consumida en el hilo de
+    /// arranque antes de llamar a `complete_start`).
+    #[allow(dead_code)]
+    pub engine_config: AudioEngineConfig,
+    /// Extremo transmisor del canal de eventos del motor (consumido por
+    /// `AudioEngine::start()` en el hilo de arranque).
+    #[allow(dead_code)]
+    pub event_tx: mpsc::Sender<EngineEvent>,
+    pub event_rx: mpsc::Receiver<EngineEvent>,
+    pub profile_key: String,
+    pub profile: Option<voxlfa_core::config::DeviceProfile>,
+    pub on_frontend: Option<Arc<FrontendCallback>>,
+    /// Clones de los `Arc<Mutex<>>` compartidos con el forwarder.
+    pub status: Arc<Mutex<Option<EngineStatus>>>,
+    pub level: Arc<Mutex<Option<LevelSample>>>,
+    pub spectrum: Arc<Mutex<Option<SpectrumSample>>>,
+    pub dsp_state: Arc<Mutex<Option<DspState>>>,
+    pub ws_events: broadcast::Sender<String>,
+    /// Config defaults para actualizar la UI al arrancar.
+    pub default_host: Option<String>,
+    pub default_input: Option<String>,
+    pub default_output: Option<String>,
+    pub buffer_size: Option<usize>,
+    /// Telemetría.
+    pub telemetry_enabled: bool,
+    pub telemetry_preset: PresetId,
+    pub telemetry_buffer: usize,
 }
 
 impl EngineManager {
@@ -139,22 +175,21 @@ impl EngineManager {
         self.config.config().clone()
     }
 
-    /// Arranca el motor con la configuración indicada.
+    /// Prepara el arranque del motor sin abrir dispositivos de audio.
     ///
-    /// Si existe un perfil guardado para el dispositivo de entrada elegido, se
-    /// arranca con su preset y se reaplican el ajuste fino del EQ y los bypasses
-    /// nada más levantar el pipeline.
+    /// Valida el estado, carga el perfil del dispositivo y crea el canal de
+    /// eventos. El lock se sostiene solo durante esta operación rápida.
+    /// El arranque real (`AudioEngine::start`) se ejecuta en un hilo
+    /// separado sin lock para evitar bloquear otros comandos.
     ///
-    /// `on_frontend` es un callback opcional que se invoca con cada evento
-    /// para reenviarlo a la UI (la capa Tauri lo conecta a `app.emit`).
-    pub fn start<F>(
+    /// El caller debe pasar el [`PendingStart`] resultante a un hilo que
+    /// llame a [`AudioEngine::start`] y luego a [`Self::complete_start`].
+    #[allow(dead_code)] // Usado desde tauri_app.rs (feature webview).
+    pub(crate) fn prepare_start(
         &mut self,
         config: AudioEngineConfig,
-        on_frontend: Option<F>,
-    ) -> Result<(), EngineError>
-    where
-        F: Fn(&EngineEvent) + Send + Sync + 'static,
-    {
+        on_frontend: Option<Arc<FrontendCallback>>,
+    ) -> Result<PendingStart, EngineError> {
         if self.handle.is_some() {
             return Err(EngineError::AlreadyRunning);
         }
@@ -165,30 +200,55 @@ impl EngineManager {
             .unwrap_or_else(|| DEFAULT_DEVICE_KEY.to_string());
         let profile = self.config.config().profile(&profile_key).cloned();
 
-        // Últimos dispositivos elegidos, para precargar la cabina al arrancar.
-        let profile_input = config.input_device.clone();
-        let profile_output = config.output_device.clone();
-        let profile_buffer = config.buffer_size;
-        let profile_host = config.audio_host.clone();
-
-        // El preset del perfil se aplica al construir la cadena inicial.
-        let mut engine_config = config;
+        let mut engine_config = config.clone();
         if let Some(profile) = &profile {
             engine_config.initial_preset = profile.preset;
         }
 
-        // Extraer datos de telemetría antes de que engine_config se mueva.
+        // Capturar valores antes de que engine_config se mueva al PendingStart.
         let telemetry_preset = engine_config.initial_preset;
         let telemetry_buffer = engine_config.buffer_size.unwrap_or(0);
 
-        let (tx, rx) = mpsc::channel();
-        let (handle, dsp, analysis) = AudioEngine::start(engine_config, tx)?;
+        let (event_tx, event_rx) = mpsc::channel();
 
+        Ok(PendingStart {
+            engine_config,
+            event_tx,
+            event_rx,
+            profile_key,
+            profile,
+            on_frontend,
+            status: self.status.clone(),
+            level: self.level.clone(),
+            spectrum: self.spectrum.clone(),
+            dsp_state: self.dsp_state.clone(),
+            ws_events: self.events.clone(),
+            default_host: config.audio_host,
+            default_input: config.input_device,
+            default_output: config.output_device,
+            buffer_size: config.buffer_size,
+            telemetry_enabled: self.config.config().telemetry_enabled == Some(true),
+            telemetry_preset,
+            telemetry_buffer,
+        })
+    }
+
+    /// Completa el arranque después de que `AudioEngine::start()` tuvo
+    /// éxito en un hilo separado. Instala los handles, crea el forwarder
+    /// y reaplica los ajustes persistidos. Lock held briefly.
+    #[allow(dead_code)] // Usado desde tauri_app.rs (feature webview).
+    pub(crate) fn complete_start(
+        &mut self,
+        pending: PendingStart,
+        handle: EngineHandle,
+        dsp: DspHandle,
+        analysis: AnalysisHandle,
+    ) {
         // Reaplicar el ajuste fino del EQ, la puerta de ruido, el feedback
         // suppressor, la corrección de tono y los bypasses persistidos.
-        if let Some(profile) = profile {
+        if let Some(profile) = &pending.profile {
             if !profile.eq_bands.is_empty() {
-                let _ = dsp.set_eq_bands(profile.eq_bands);
+                let _ = dsp.set_eq_bands(profile.eq_bands.clone());
             }
             if let Some(gate) = profile.gate_params {
                 let _ = dsp.set_noise_gate(gate);
@@ -202,33 +262,33 @@ impl EngineManager {
             if profile.global_bypass {
                 let _ = dsp.set_global_bypass(true);
             }
-            for (link, bypass) in profile.link_bypass {
-                let _ = dsp.set_link_bypass(&link, bypass);
+            for (link, bypass) in &profile.link_bypass {
+                let _ = dsp.set_link_bypass(link, *bypass);
             }
         }
 
         // Recordar los últimos dispositivos elegidos para precargar la UI.
         let cfg = self.config.config_mut();
-        cfg.default_host = profile_host;
-        cfg.default_input = profile_input.clone();
-        cfg.default_output = profile_output.clone();
-        cfg.buffer_size = profile_buffer;
+        cfg.default_host = pending.default_host;
+        cfg.default_input = pending.default_input;
+        cfg.default_output = pending.default_output;
+        cfg.buffer_size = pending.buffer_size;
 
-        self.current_device = Some(profile_key);
+        self.current_device = Some(pending.profile_key);
 
         // Hilo forwarder: canal del motor → UI + WebSocket.
-        let status = self.status.clone();
-        let level = self.level.clone();
-        let spectrum = self.spectrum.clone();
-        let dsp_state = self.dsp_state.clone();
-        let events = self.events.clone();
-        let on_frontend: Option<Arc<FrontendCallback>> =
-            on_frontend.map(|f| Arc::new(f) as Arc<FrontendCallback>);
+        let status = pending.status;
+        let level = pending.level;
+        let spectrum = pending.spectrum;
+        let dsp_state = pending.dsp_state;
+        let ws_events = pending.ws_events;
+        let on_frontend = pending.on_frontend;
+        let event_rx = pending.event_rx;
 
         thread::Builder::new()
             .name("voxlfa-event-forwarder".to_string())
             .spawn(move || {
-                while let Ok(event) = rx.recv() {
+                while let Ok(event) = event_rx.recv() {
                     // 1) Actualizar el estado compartido.
                     if let EngineEvent::Status(status_event) = &event {
                         if let Ok(mut guard) = status.lock() {
@@ -258,30 +318,28 @@ impl EngineManager {
 
                     // 3) Difundir al WebSocket de la app móvil.
                     if let Ok(json) = serde_json::to_string(&event) {
-                        let _ = events.send(json);
+                        let _ = ws_events.send(json);
                     }
                 }
             })
-            .map_err(voxlfa_core::Error::from)?;
+            .ok();
 
         self.handle = Some(handle);
         self.dsp = Some(dsp);
         self.analysis = Some(analysis);
 
         // Telemetría: iniciar cronómetro y emitir `SessionStarted`.
-        if self.config.config().telemetry_enabled == Some(true) {
+        if pending.telemetry_enabled {
             let mut timer = SessionTimer::start();
-            timer.record_latency(0.0); // Se actualizará con las muestras reales.
+            timer.record_latency(0.0);
             self.session_timer = Some(timer);
-            self.session_preset = Some(telemetry_preset);
+            self.session_preset = Some(pending.telemetry_preset);
             self.telemetry.emit(TelemetryEvent::SessionStarted {
-                preset: telemetry_preset.to_string(),
-                sample_rate: 0, // Se actualizará con el status real.
-                buffer_size: telemetry_buffer,
+                preset: pending.telemetry_preset.to_string(),
+                sample_rate: 0,
+                buffer_size: pending.telemetry_buffer,
             });
         }
-
-        Ok(())
     }
 
     /// Detiene el motor de forma controlada.
@@ -527,6 +585,24 @@ impl EngineManager {
         self.update_current_profile(|profile| {
             profile.harmonizer_params = Some(params);
         });
+        Ok(())
+    }
+
+    pub fn set_compressor(
+        &mut self,
+        params: voxlfa_core::protocol::CompressorParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_compressor(params)?;
+        Ok(())
+    }
+
+    pub fn set_de_esser(
+        &mut self,
+        params: voxlfa_core::protocol::DeEsserParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_de_esser(params)?;
         Ok(())
     }
 

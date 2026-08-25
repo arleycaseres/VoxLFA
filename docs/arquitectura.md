@@ -180,14 +180,20 @@ Cáscara de escritorio que orquesta el core:
 - `src-tauri/src/tauri_app.rs` (feature `webview`): comandos expuestos a la UI,
   incluidos `apply_preset`, `set_global_bypass`, `set_link_bypass`,
   `set_eq_band`, `set_noise_gate`, `set_delay`, `set_reverb`, `set_saturator`,
-  `set_dynamic_eq` y `set_harmonizer`, que reconfiguran la cadena DSP en vivo
-  vía `EngineManager`, y los de análisis: `get_analysis`, `get_session_summary`
-  y `apply_suggestion`.
+  `set_dynamic_eq`, `set_harmonizer`, `set_compressor` y `set_de_esser`,
+  que reconfiguran la cadena DSP en vivo vía `EngineManager`, y los de
+  análisis: `get_analysis`, `get_session_summary` y `apply_suggestion`.
 
 La UI (React/TS) accede a Tauri **solo** a través de `src/lib/tauri.ts`; el
 estado se consume con el hook `useEngine` (que también replica la cabina con un
-mock en navegador para previsualizar sin Tauri). La lógica de emparejamiento del
-escritorio es solo de lectura: el código se genera una vez y se muestra.
+mock en navegador para previsualizar sin Tauri). La interfaz ofrece dos modos:
+
+- **Simple**: 4 sliders grandes (Claridad, Reducir ruido, Evitar pitidos,
+  Volumen parejo) que mapean parámetros DSP múltiples de forma transparente.
+- **Avanzado**: acordeón con 4 categorías (Básico, Dinámica, Efectos,
+  Creativos) que muestran los paneles DSP individuales.
+
+El estado del modo UI y del acordeón se persiste en `localStorage`.
 
 ### `mobile/` — VoxLFA Monitor (Expo/React Native)
 
@@ -232,15 +238,17 @@ el escritorio ejecuta contra el motor; el resultado vuelve como evento `dsp`.
 La cadena no se toca desde el hilo de audio:
 
 1. La UI llama `apply_preset`/`set_*_bypass`/`set_eq_band`/`set_noise_gate`/
-   `set_delay`/`set_reverb`/`set_saturator`/`set_dynamic_eq`/`set_harmonizer`
+   `set_delay`/`set_reverb`/`set_saturator`/`set_dynamic_eq`/`set_harmonizer`/
+   `set_compressor`/`set_de_esser`
    → `DspCommand` por canal mpsc.
 2. El hilo de control de `DspHandle` construye la cadena (o el módulo) nueva
    —aquí sí se puede asignar memoria— y la intercambia atómicamente con la
    activa. Para el ajuste fino solo se reemplaza el procesador del eslabón
    (`SetLinkProcessor`/`SetLinkGate`), sin reconstruir delay/reverb ni perder
-   su estado. Para delay/reverb/saturador/dynamic_eq/harmonizer se reconstruye
+   su estado. Para delay/reverb/saturador/dynamic_eq/harmonizer/compressor/de-esser se reconstruye
    el procesador completo (`SetLinkDelay`/`SetLinkReverb`/
-   `SetLinkSaturator`/`SetLinkDynamicEq`/`SetLinkHarmonizer`).
+   `SetLinkSaturator`/`SetLinkDynamicEq`/`SetLinkHarmonizer`/
+   `SetLinkCompressor`/`SetLinkDeEsser`).
 3. El callback de audio solo ve el puntero nuevo en la siguiente iteración;
    actualiza `Arc<Mutex<DspState>>` y emite `EngineEvent::Dsp`.
 
@@ -253,7 +261,9 @@ El WebSocket pasa de solo difundir a ser **bidireccional**:
    `EngineManager` tomado solo durante la ejecución (nunca al hacer `await`),
    delega en los mismos métodos que usa la cabina (`stop`, `apply_preset`,
    `set_global_bypass`, `set_link_bypass`, `set_eq_band`). El móvil no ajusta la
-   puerta de ruido: la ve en solo lectura.
+   puerta de ruido: la ve en solo lectura. Recientemente se añadieron
+   `set_compressor` y `set_de_esser` para permitir el ajuste en vivo desde
+   el móvil (solo a través de `ControlCommand`, no de `DspCommand` directo).
 3. `EngineManager` persiste el cambio (igual que desde la cabina) y el core
    emite el evento `Dsp`/`status` correspondiente, que el WS vuelve a difundir a
    todos los clientes: el móvil se entera del resultado sin respuestas dedicadas.

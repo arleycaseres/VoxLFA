@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Barra flotante de sugerencias de IA — overlay fijo que se ve siempre
 // encima del contenido, con botón toggle para mostrar/ocultar.
 
@@ -10,7 +11,7 @@ interface FloatingSuggestionProps {
   onDismiss: (id: number) => void;
 }
 
-export function FloatingSuggestion({
+const FloatingSuggestion = memo(function FloatingSuggestion({
   suggestions,
   onApply,
   onDismiss,
@@ -70,6 +71,8 @@ export function FloatingSuggestion({
       </div>
     </div>
   );
-}
+});
 
 export default FloatingSuggestion;
+
+export { FloatingSuggestion };

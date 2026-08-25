@@ -9,6 +9,8 @@ import { SPECTRUM_BIN_COUNT } from "./types";
 import type {
   AnalysisSample,
   AppConfig,
+  CompressorParams,
+  DeEsserParams,
   DelayParams,
   DenoiseParams,
   DeviceList,
@@ -261,6 +263,8 @@ function buildDspState(preset: PresetId): DspState {
     saturatorParams: null,
     dynamicEqParams: null,
     harmonizerParams: null,
+    compressorParams: null,
+    deEsserParams: null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -756,6 +760,32 @@ export function setHarmonizer(params: HarmonizerParams): Promise<void> {
     links: dspState.links.map((item) =>
       item.name === "harmonizer"
         ? { ...item, harmonizerParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setCompressor(params: CompressorParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "compressor"
+        ? { ...item, compressorParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setDeEsser(params: DeEsserParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "deesser"
+        ? { ...item, deEsserParams: params }
         : item,
     ),
   };

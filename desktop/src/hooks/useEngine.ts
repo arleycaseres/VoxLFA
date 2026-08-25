@@ -7,6 +7,8 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   AnalysisSample,
   AppConfig,
+  CompressorParams,
+  DeEsserParams,
   DelayParams,
   DenoiseParams,
   DeviceList,
@@ -47,6 +49,8 @@ import {
   onModelDownloadProgress,
   onPairingEvent,
   requestAiSuggestions,
+  setCompressor,
+  setDeEsser,
   setDenoise,
   setEqBand,
   setFeedback,
@@ -135,6 +139,10 @@ export interface EngineController {
   setDynamicEq: (params: DynamicEqParams) => Promise<void>;
   /** Ajusta los parámetros del harmonizer del preset activo en vivo. */
   setHarmonizer: (params: HarmonizerParams) => Promise<void>;
+  /** Ajusta los parámetros del compresor del preset activo en vivo. */
+  setCompressor: (params: CompressorParams) => Promise<void>;
+  /** Ajusta los parámetros del de-esser del preset activo en vivo. */
+  setDeEsser: (params: DeEsserParams) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
@@ -328,6 +336,22 @@ export function useEngine(): EngineController {
     }
   }, []);
 
+  const setCompressorAction = useCallback(async (params: CompressorParams) => {
+    try {
+      await setCompressor(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setDeEsserAction = useCallback(async (params: DeEsserParams) => {
+    try {
+      await setDeEsser(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
   const applySuggestionAction = useCallback(async (suggestionId: number) => {
     try {
       await applySuggestion(suggestionId);
@@ -508,6 +532,8 @@ export function useEngine(): EngineController {
     setSaturator: setSaturatorAction,
     setDynamicEq: setDynamicEqAction,
     setHarmonizer: setHarmonizerAction,
+    setCompressor: setCompressorAction,
+    setDeEsser: setDeEsserAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
     setTelemetryConsent: setTelemetryConsentAction,

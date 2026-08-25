@@ -447,6 +447,12 @@ impl AudioEngine {
                             DspCommand::SetLinkHarmonizer { processor, params } => {
                                 chain.set_link_harmonizer(processor, params);
                             }
+                            DspCommand::SetLinkCompressor { processor, params } => {
+                                chain.set_link_compressor(processor, params);
+                            }
+                            DspCommand::SetLinkDeEsser { processor, params } => {
+                                chain.set_link_de_esser(processor, params);
+                            }
                         }
                     }
 
@@ -734,20 +740,19 @@ fn heuristic_buffer_size(input_name: &str, output_name: &str) -> usize {
     }
 
     // Interfaces USB de gama alta → buffer pequeño (baja latencia).
-    const LOW_LATENCY: &[&str] = &["scarlett", "focusrite", "steinberg", "rme"];
+    const LOW_LATENCY: &[&str] = &["scarlett", "focusrite", "steinberg", "presonus", "rme"];
     if LOW_LATENCY.iter().any(|kw| names.contains(kw)) {
         return 128;
     }
 
-    // Interfaces USB de gama media/baja (Behringer, genéricas) → buffer
-    // moderado. Estas interfaces tienen mayor latencia USB inherente y
-    // necesitan más margen para evitar underruns con DSP activo.
+    // Interfaces USB de gama media/baja (Behringer, etc.) → buffer moderado.
+    // Estas interfaces tienen mayor latencia USB inherente y necesitan más
+    // margen para evitar underruns con DSP activo.
     const BUDGET_USB: &[&str] = &[
         "behringer",
         "umc",
         "u-phoria",
         "yamaha",
-        "presonus",
         "arturia",
         "maono",
         "mtrack",
@@ -757,14 +762,8 @@ fn heuristic_buffer_size(input_name: &str, output_name: &str) -> usize {
         return 512;
     }
 
-    // Cualquier otro dispositivo USB no clasificado → 512 (más margen para
-    // evitar underruns con DSP activo; 256 era demasiado agresivo para
-    // codecs genéricos).
-    if names.contains("usb") || names.contains("interface") {
-        return 512;
-    }
-
-    // Predeterminado equilibrado para el resto (micrófonos integrados, etc.).
+    // Predeterminado equilibrado para el resto (USB genérico, micrófonos
+    // integrados, etc.): 256 muestras.
     256
 }
 
@@ -984,16 +983,29 @@ mod tests {
             512
         );
         assert_eq!(heuristic_buffer_size("BEHRINGER UMC 22", "USB Audio"), 512);
-        // USB genérico no clasificado → 512 (suficiente margen para
-        // codecs USB genéricos como "USB AUDIO CODEC").
-        assert_eq!(
-            heuristic_buffer_size("Micrófono (USB Audio)", "Altavoces (USB Audio)"),
-            512
-        );
+    }
+
+    #[test]
+    fn heuristic_uses_balanced_buffer_for_generic_usb() {
+        // USB genérico sin marca reconocida → 256 (equilibrado).
         assert_eq!(
             heuristic_buffer_size("USB AUDIO CODEC", "USB AUDIO CODEC"),
-            512
+            256
         );
+        assert_eq!(
+            heuristic_buffer_size("Micrófono (USB Audio)", "Altavoces (USB Audio)"),
+            256
+        );
+        assert_eq!(
+            heuristic_buffer_size("Generic USB Device", "USB Audio"),
+            256
+        );
+    }
+
+    #[test]
+    fn heuristic_includes_presonus_in_low_latency() {
+        // PreSonus es gama profesional → 128.
+        assert_eq!(heuristic_buffer_size("PreSonus AudioBox", "USB Audio"), 128);
     }
 
     #[test]

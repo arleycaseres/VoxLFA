@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Panel de control fino del ecualizador: un slider por banda del preset activo.
 //
 // El slider ajusta la ganancia en pasos finos (0.1 dB) dentro del rango
@@ -39,7 +40,7 @@ interface EqPanelProps {
   onSetEqBand: (bandIndex: number, gainDb: number) => void;
 }
 
-export function EqPanel({ dsp, running, onSetEqBand }: EqPanelProps) {
+const EqPanel = memo(function EqPanel({ dsp, running, onSetEqBand }: EqPanelProps) {
   const eqLink = dsp?.links.find((link) => link.name === "eq") ?? null;
   const bands = eqLink?.eqBands ?? null;
   const bypassed = (eqLink?.bypass ?? false) || (dsp?.globalBypass ?? false);
@@ -110,4 +111,6 @@ export function EqPanel({ dsp, running, onSetEqBand }: EqPanelProps) {
       )}
     </div>
   );
-}
+});
+
+export { EqPanel };

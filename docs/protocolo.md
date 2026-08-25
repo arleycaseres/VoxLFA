@@ -83,7 +83,7 @@ mensajes JSON por el WebSocket para el móvil.
   "preset": "vozLimpia",
   "globalBypass": false,
   "links": [
-    { "name": "highpass",  "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null },
+    { "name": "highpass",  "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null, "compressorParams": null, "deEsserParams": null },
     {
       "name": "noisegate",
       "enabled": true,
@@ -96,9 +96,9 @@ mensajes JSON por el WebSocket para el móvil.
         "holdMs": 120,
         "rangeDb": 40
       },
-      "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null
+      "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null, "compressorParams": null, "deEsserParams": null
     },
-    { "name": "boomsuppressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null },
+    { "name": "boomsuppressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null, "compressorParams": null, "deEsserParams": null },
     {
       "name": "eq",
       "enabled": true,
@@ -108,10 +108,10 @@ mensajes JSON por el WebSocket para el móvil.
         { "kind": "peaking",  "freqHz": 3000, "gainDb": 2,    "q": 1.5 },
         { "kind": "highShelf","freqHz": 8000, "gainDb": 1.5,  "q": 0.8 }
       ],
-      "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null
+      "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null, "compressorParams": null, "deEsserParams": null
     },
-    { "name": "deesser",    "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null },
-    { "name": "compressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null },
+    { "name": "deesser",    "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null, "compressorParams": null, "deEsserParams": { "thresholdDb": -32, "freqHz": 6500, "amount": 0.5 } },
+    { "name": "compressor", "enabled": true, "bypass": false, "eqBands": null, "gateParams": null, "denoiseParams": null, "feedbackParams": null, "pitchCorrectionParams": null, "saturatorParams": null, "dynamicEqParams": null, "harmonizerParams": null, "delayParams": null, "reverbParams": null, "compressorParams": { "thresholdDb": -24, "ratio": 3.0, "attackMs": 5.0, "releaseMs": 80.0, "makeupDb": 3.0 }, "deEsserParams": null },
     {
       "name": "delay",
       "enabled": true,
@@ -185,6 +185,11 @@ mensajes JSON por el WebSocket para el móvil.
 - `reverbParams`: solo lo lleva el módulo `reverb`; incluye `mode` (plate/hall/
   room), `roomSize`, `damping`, `wet`, `preDelayMs`, `highCutHz`, `lowCutHz`.
   Se ajusta con `set_reverb`.
+- `compressorParams`: solo lo lleva el módulo `compressor`; incluye
+  `thresholdDb`, `ratio`, `attackMs`, `releaseMs` y `makeupDb`. Se ajusta con
+  `set_compressor`.
+- `deEsserParams`: solo lo lleva el módulo `deesser`; incluye `thresholdDb`,
+  `freqHz` y `amount` (0–1). Se ajusta con `set_de_esser`.
 - `latencyMs` (ver evento `status`) ya **incluye** la latencia propia de la
   cadena (p. ej. el limiter suma su lookahead).
 
@@ -327,6 +332,8 @@ campos en camelCase:
 | `set_saturator` | `{ params: SaturatorParams }` | `DspState` |
 | `set_dynamic_eq` | `{ params: DynamicEqParams }` | `DspState` |
 | `set_harmonizer` | `{ params: HarmonizerParams }` | `DspState` |
+| `set_compressor` | `{ params: CompressorParams }` | `DspState` |
+| `set_de_esser` | `{ params: DeEsserParams }` | `DspState` |
 | `get_analysis` | — | `AnalysisSample \| null` |
 | `get_session_summary` | — | `SessionSummary \| null` |
 | `apply_suggestion` | `{ suggestionId: number }` | — |
@@ -458,8 +465,8 @@ Los argumentos en JS usan camelCase (Tauri v2 los convierte desde snake_case).
   - **Server → client**: eventos del motor (`status`, `level`, `dsp`, …).
   - **Client → server**: comandos `stop`, `setPreset`, `setGlobalBypass`,
     `setLinkBypass`, `setEqBand`, `setNoiseGate`, `setDelay`, `setReverb`,
-    `setSaturator`, `setDynamicEq` y `setHarmonizer`
-    (JSON con `tag = "type"`). `start` se rechaza.
+    `setSaturator`, `setDynamicEq`, `setHarmonizer`, `setCompressor` y
+    `setDeEsser` (JSON con `tag = "type"`). `start` se rechaza.
 - Comandos malformados o fallidos se responden con un evento `warning` dirigido
   al cliente que los envió.
 - Límites de entrada (seguridad): mensajes ≤ 1 KB; ganancia del EQ acotada a
