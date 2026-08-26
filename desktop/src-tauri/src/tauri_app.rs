@@ -74,6 +74,9 @@ pub struct AppState {
     pub mdns: Option<MdnsAdvertiser>,
     /// Receptor de eventos de telemetría (para enviar al backend de telemetría).
     telemetry_rx: std::sync::Mutex<Option<telemetry::TelemetryReceiver>>,
+    /// Handle para emitir eventos de telemetría desde comandos que no tienen
+    /// acceso al `EngineManager` (p. ej. `start_engine` en la Fase 3).
+    telemetry_handle: telemetry::TelemetryHandle,
     /// Últimas sugerencias generadas por el asesor de IA (Groq).
     ai_suggestions: std::sync::Mutex<Vec<Suggestion>>,
 }
@@ -92,13 +95,14 @@ impl AppState {
         Self {
             engine: Arc::new(Mutex::new(EngineManager::new(
                 events.clone(),
-                telemetry_handle,
+                telemetry_handle.clone(),
             ))),
             events,
             pairing: Arc::new(Mutex::new(PairingState::new(DEFAULT_CODE_LENGTH))),
             pairing_events,
             mdns,
             telemetry_rx: std::sync::Mutex::new(Some(telemetry_rx)),
+            telemetry_handle,
             ai_suggestions: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -160,12 +164,18 @@ fn list_devices_for_host(host_id: String) -> Result<DeviceListResponse, String> 
 /// `buffer_size` (muestras/callback) es opcional: si es `None`, el core elige
 /// uno automáticamente según el tipo de dispositivo (heurística de latencia).
 /// `audio_host` permite elegir el backend de audio (p. ej. `"jack"`, `"alsa"`).
+/// `force` (`false` = predeterminado) obliga a ignorar la guarda de dispositivo
+/// huérfano y reintentar de todas formas.
 ///
 /// La apertura del dispositivo se ejecuta en un hilo separado sin mantener el
 /// lock de `EngineManager`, para que otros comandos (get_engine_status, etc.)
 /// no queden bloqueados si el hardware tarda o se cuelga. Si el dispositivo
 /// no responde en [`STARTUP_TIMEOUT_SECS`] segundos, se devuelve un error
 /// inmediato al usuario y el hilo de apertura queda descartado.
+///
+/// Si el dispositivo queda huérfano tras un timeout, se registra internamente
+/// y el siguiente intento sin `force` devolverá un error estructurado
+/// `DeviceLikelyStuck` para que la UI pida confirmación antes de reintentar.
 #[tauri::command]
 fn start_engine(
     app: AppHandle,
@@ -174,9 +184,9 @@ fn start_engine(
     output_device: Option<String>,
     buffer_size: Option<usize>,
     audio_host: Option<String>,
+    force: Option<bool>,
 ) -> Result<(), String> {
-    const TIMEOUT_ERR: &str = "No se pudo abrir el dispositivo: no respondió a tiempo. \
-         El dispositivo puede estar ocupado o ser incompatible.";
+    let force = force.unwrap_or(false);
 
     // --- Fase 1: validar y preparar (bajo lock, operación rápida) -----------
     let mut pending = {
@@ -199,25 +209,34 @@ fn start_engine(
                     ..Default::default()
                 },
                 on_frontend,
+                force,
             )
-            .map_err(|err| err.to_string())?
+            .map_err(|err| serde_json::to_string(&err).unwrap_or_else(|_| err.to_string()))?
     };
     // Lock liberado aquí: otros comandos pueden proceder.
+
+    // Capturar valores para la Fase 3 y para limpieza del hilo huérfano.
+    let pending_profile_key = pending.profile_key.clone();
+    let pending_telemetry_enabled = pending.telemetry_enabled;
 
     // --- Fase 2: arranque bloqueante en hilo dedicado (sin lock) --------------
     let engine_arc = state.engine.clone();
     let (result_tx, result_rx) = mpsc::channel::<Result<(), String>>();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_clone = cancel.clone();
+    let profile_key_for_thread = pending_profile_key.clone();
+    let engine_for_cleanup = engine_arc.clone();
 
     std::thread::Builder::new()
         .name("voxlfa-engine-start".to_string())
         .spawn(move || {
-            let core_result =
-                voxlfa_core::audio::AudioEngine::start(
-                    pending.engine_config.take().expect("engine_config already taken"),
-                    pending.event_tx.take().expect("event_tx already taken"),
-                );
+            let core_result = voxlfa_core::audio::AudioEngine::start(
+                pending
+                    .engine_config
+                    .take()
+                    .expect("engine_config already taken"),
+                pending.event_tx.take().expect("event_tx already taken"),
+            );
 
             // Si alguien ya canceló (timeout o startup más reciente), limpiar.
             if cancel_clone.load(Ordering::Relaxed) {
@@ -227,6 +246,8 @@ fn start_engine(
                     handle.request_stop();
                     let _ = handle.join();
                 }
+                // El hilo terminó después del timeout pero fue cancelado.
+                // No limpiamos el huérfano aquí porque fue cancelación explícita.
                 return;
             }
 
@@ -236,6 +257,8 @@ fn start_engine(
                     match engine_arc.lock() {
                         Ok(mut engine) => {
                             engine.complete_start(pending, handle, dsp, analysis);
+                            // El hilo completó con éxito: limpiar huérfano si existía.
+                            engine.clear_orphaned(&profile_key_for_thread);
                             let _ = result_tx.send(Ok(()));
                         }
                         Err(_) => {
@@ -248,6 +271,10 @@ fn start_engine(
                     }
                 }
                 Err(e) => {
+                    // El hilo completó con error (no timeout): limpiar huérfano.
+                    if let Ok(mut engine) = engine_for_cleanup.lock() {
+                        engine.clear_orphaned(&profile_key_for_thread);
+                    }
                     let _ = result_tx.send(Err(e.to_string()));
                 }
             }
@@ -261,7 +288,37 @@ fn start_engine(
         Err(_timeout) => {
             // Señalar al hilo de apertura que descarte el resultado.
             cancel.store(true, Ordering::Relaxed);
-            Err(TIMEOUT_ERR.into())
+
+            // Registrar como huérfano bajo lock.
+            {
+                if let Ok(mut engine) = state.engine.lock() {
+                    engine.mark_orphaned(&pending_profile_key);
+                }
+            }
+
+            // Log de advertencia con sugerencia de diagnóstico.
+            log::warn!(
+                "[device-stuck] '{}' quedó huérfano tras {}s — posible cuelgue \
+                 de driver a nivel de kernel. Revisar dmesg/journalctl.",
+                pending_profile_key,
+                STARTUP_TIMEOUT_SECS
+            );
+
+            // Telemetría anónima (solo si el usuario habilitó opt-in).
+            if pending_telemetry_enabled {
+                state
+                    .telemetry_handle
+                    .emit(telemetry::TelemetryEvent::DeviceOrphaned {
+                        device: pending_profile_key.clone(),
+                        buffer_size,
+                    });
+            }
+
+            // Devolver error estructurado serializado como JSON.
+            let err = crate::start_error::StartEngineError::Timeout {
+                device: Some(pending_profile_key),
+            };
+            Err(serde_json::to_string(&err).unwrap_or_else(|_| err.to_string()))
         }
     }
 }

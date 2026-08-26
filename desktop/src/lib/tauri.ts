@@ -77,15 +77,17 @@ export function listDevicesForHost(hostId: string): Promise<DeviceList> {
 
 /** Arranca el motor con los dispositivos dados (`null` = predeterminado).
  *  `bufferSize` (`null` = auto por heurística de dispositivo).
- *  `audioHost` (`null` = predeterminado del sistema; p. ej. `"jack"`, `"alsa"`). */
+ *  `audioHost` (`null` = predeterminado del sistema; p. ej. `"jack"`, `"alsa"`).
+ *  `force` (`false` = predeterminado) ignora la guarda de dispositivo huérfano. */
 export function startEngine(
   inputDevice: string | null,
   outputDevice: string | null,
   bufferSize?: number | null,
   audioHost?: string | null,
+  force?: boolean,
 ): Promise<void> {
   return inTauri()
-    ? invoke<void>("start_engine", { inputDevice, outputDevice, bufferSize, audioHost })
+    ? invoke<void>("start_engine", { inputDevice, outputDevice, bufferSize, audioHost, force: force ?? false })
     : mock.startEngine(bufferSize);
 }
 

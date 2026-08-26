@@ -18,9 +18,11 @@ pub mod engine;
 pub mod llm;
 pub mod mdns;
 pub mod pairing;
+pub mod start_error;
 pub mod ws;
 
 pub use engine::{EngineError, EngineManager};
+pub use start_error::StartEngineError;
 
 #[cfg(feature = "webview")]
 mod tauri_app;

@@ -66,6 +66,13 @@ pub enum TelemetryEvent {
         /// `true` si el usuario activó la telemetría.
         enabled: bool,
     },
+    /// Un dispositivo de audio quedó huérfano tras un timeout de apertura.
+    DeviceOrphaned {
+        /// Nombre del dispositivo que causó el timeout.
+        device: String,
+        /// Tamaño de buffer solicitado (0 si no se especificó).
+        buffer_size: Option<usize>,
+    },
 }
 
 /// Handle para emitir eventos de telemetría desde cualquier hilo.

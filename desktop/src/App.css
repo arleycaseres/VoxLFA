@@ -321,6 +321,24 @@
   border: 1px solid rgba(255, 180, 40, 0.3);
 }
 
+.controls__stuck-banner {
+  font-size: 0.78rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  color: var(--color-text);
+  background: rgba(255, 120, 40, 0.08);
+  border: 1px solid rgba(255, 120, 40, 0.35);
+}
+
+.controls__stuck-banner p {
+  margin: 0 0 0.5rem;
+}
+
+.controls__stuck-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 /* ---------- Centro: dial ---------- */
 .app__center {
   display: flex;

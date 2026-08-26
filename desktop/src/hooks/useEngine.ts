@@ -3,7 +3,7 @@
 // Conecta la UI con el backend de Tauri: escucha los eventos del motor
 // (estado, niveles, dispositivos, avisos) y expone acciones tipadas.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AnalysisSample,
   AppConfig,
@@ -28,6 +28,7 @@ import type {
   HarmonizerParams,
   SessionSummary,
   SpectrumSample,
+  StartEngineError,
   Suggestion,
 } from "../lib/types";
 import {
@@ -100,6 +101,12 @@ export interface EngineController {
   error: string | null;
   /** `true` mientras una operación de arranque/parada está en curso. */
   busy: boolean;
+  /** Error de dispositivo probablemente atascado (requiere confirmación para reintentar). */
+  deviceStuckError: StartEngineError | null;
+  /** Reintenta el arranque con `force: true` ignorando la guarda de huérfano. */
+  retryWithForce: () => Promise<void>;
+  /** Cierra el diálogo de dispositivo atascado sin reintentar. */
+  dismissDeviceStuck: () => void;
   /** Arranca el motor con los dispositivos indicados (`null` = default).
    *  `bufferSize` (`null` = auto por heurística de dispositivo).
    *  `audioHost` (`null` = predeterminado del sistema; p. ej. `"jack"`, `"alsa"`). */
@@ -163,6 +170,18 @@ export interface EngineController {
   requestAi: () => Promise<void>;
 }
 
+/** Intenta parsear un error de Tauri como `StartEngineError` JSON. */
+function parseStartError(err: unknown): StartEngineError | null {
+  if (typeof err !== "string") return null;
+  try {
+    const parsed = JSON.parse(err);
+    if (parsed && typeof parsed.kind === "string") return parsed as StartEngineError;
+  } catch {
+    // no era JSON
+  }
+  return null;
+}
+
 /**
  * Suscribe el componente a los eventos del motor y expone el control.
  * Úsese una sola vez en la raíz de la app.
@@ -183,6 +202,14 @@ export function useEngine(): EngineController {
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deviceStuckError, setDeviceStuckError] = useState<StartEngineError | null>(null);
+  // Params del último intento de arranque, para retry con force.
+  const lastStartRef = useRef<{
+    input: string | null;
+    output: string | null;
+    bufferSize: number | null;
+    audioHost: string | null;
+  } | null>(null);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelDownloadProgress, setModelDownloadProgress] = useState<{
     step: number;
@@ -206,19 +233,48 @@ export function useEngine(): EngineController {
       output?: string | null,
       bufferSize?: number | null,
       audioHost?: string | null,
+      force?: boolean,
     ) => {
+      const resolvedInput = input ?? null;
+      const resolvedOutput = output ?? null;
+      const resolvedBuffer = bufferSize ?? null;
+      const resolvedHost = audioHost ?? null;
       setBusy(true);
       setError(null);
+      setDeviceStuckError(null);
+      // Guardar params para posible retry.
+      lastStartRef.current = {
+        input: resolvedInput,
+        output: resolvedOutput,
+        bufferSize: resolvedBuffer,
+        audioHost: resolvedHost,
+      };
       try {
-        await startEngine(input ?? null, output ?? null, bufferSize ?? null, audioHost ?? null);
+        await startEngine(resolvedInput, resolvedOutput, resolvedBuffer, resolvedHost, force);
       } catch (err) {
-        setError(String(err));
+        // Intentar parsear como StartEngineError JSON estructurado.
+        const parsed = parseStartError(err);
+        if (parsed?.kind === "deviceLikelyStuck") {
+          setDeviceStuckError(parsed);
+        } else {
+          setError(parsed?.message ?? String(err));
+        }
       } finally {
         setBusy(false);
       }
     },
     [],
   );
+
+  const retryWithForce = useCallback(async () => {
+    const params = lastStartRef.current;
+    if (!params) return;
+    await start(params.input, params.output, params.bufferSize, params.audioHost, true);
+  }, [start]);
+
+  const dismissDeviceStuck = useCallback(() => {
+    setDeviceStuckError(null);
+  }, []);
 
   const stop = useCallback(async () => {
     setBusy(true);
@@ -514,6 +570,9 @@ export function useEngine(): EngineController {
     warning,
     error,
     busy,
+    deviceStuckError,
+    retryWithForce,
+    dismissDeviceStuck,
     modelStatus,
     modelDownloadProgress,
     start,

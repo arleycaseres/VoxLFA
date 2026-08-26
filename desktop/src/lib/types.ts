@@ -12,6 +12,21 @@ export type EngineState =
   | "stopping"
   | "error";
 
+/** Error estructurado que devuelve `start_engine` al frontend. */
+export type StartEngineErrorKind =
+  | "alreadyRunning"
+  | "timeout"
+  | "deviceLikelyStuck"
+  | "core";
+
+export interface StartEngineError {
+  kind: StartEngineErrorKind;
+  device?: string;
+  orphanedAt?: number;
+  stuckCount?: number;
+  message?: string;
+}
+
 /** Descripción de un dispositivo de audio del sistema. */
 export interface AudioDeviceInfo {
   /** Nombre único del dispositivo (identificador que usa el motor). */

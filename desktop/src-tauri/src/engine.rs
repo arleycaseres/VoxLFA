@@ -12,6 +12,7 @@
 //! `config.json` con perfiles por dispositivo de entrada y los reaplica al
 //! arrancar (preset + ajuste fino del EQ + bypasses).
 
+use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
@@ -43,6 +44,16 @@ pub enum EngineError {
 /// Callback de reenvío de eventos hacia la UI (inyectado por la capa Tauri).
 pub type FrontendCallback = dyn Fn(&EngineEvent) + Send + Sync;
 
+/// Registro de un intento de arranque que hizo timeout pero cuyo hilo puede
+/// seguir bloqueado a nivel de kernel/ALSA.
+#[derive(Debug, Clone)]
+pub(crate) struct OrphanedAttempt {
+    /// Timestamp (epoch seconds) de cuándo se marcó como huérfano.
+    pub orphaned_at: u64,
+    /// Cuántas veces este dispositivo ha quedado huérfano en esta sesión.
+    pub stuck_count: u32,
+}
+
 /// Estado y ciclo de vida del motor, compartido entre comandos y el WS.
 pub struct EngineManager {
     handle: Option<EngineHandle>,
@@ -71,6 +82,9 @@ pub struct EngineManager {
     session_timer: Option<SessionTimer>,
     /// Preset activo al arrancar la sesión (para el evento `SessionEnded`).
     session_preset: Option<PresetId>,
+    /// Intentos de arranque que hicieron timeout pero cuyo hilo puede
+    /// seguir bloqueado a nivel de kernel/ALSA (clave = profile_key).
+    orphaned_attempts: HashMap<String, OrphanedAttempt>,
 }
 
 /// Datos capturados por `prepare_start()` para completar el arranque en un
@@ -132,6 +146,7 @@ impl EngineManager {
             telemetry,
             session_timer: None,
             session_preset: None,
+            orphaned_attempts: HashMap::new(),
         }
     }
 
@@ -175,12 +190,47 @@ impl EngineManager {
         self.config.config().clone()
     }
 
+    /// Registra que un intento de arranque para `profile_key` quedó huérfano
+    /// (timeout sin que el hilo haya completado).
+    #[allow(dead_code)] // Usado desde tauri_app.rs (feature webview).
+    pub(crate) fn mark_orphaned(&mut self, profile_key: &str) {
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let entry = self
+            .orphaned_attempts
+            .entry(profile_key.to_string())
+            .or_insert_with(|| OrphanedAttempt {
+                orphaned_at: now_epoch,
+                stuck_count: 0,
+            });
+        entry.stuck_count += 1;
+        entry.orphaned_at = now_epoch;
+    }
+
+    /// Limpia el registro huérfano para `profile_key` (el hilo completó).
+    #[allow(dead_code)] // Usado desde tauri_app.rs (feature webview).
+    pub(crate) fn clear_orphaned(&mut self, profile_key: &str) {
+        self.orphaned_attempts.remove(profile_key);
+    }
+
+    /// Devuelve la información de intento huérfano para `profile_key`, si
+    /// existe.
+    #[allow(dead_code)] // Usado desde tauri_app.rs (feature webview).
+    pub(crate) fn orphaned_info(&self, profile_key: &str) -> Option<OrphanedAttempt> {
+        self.orphaned_attempts.get(profile_key).cloned()
+    }
+
     /// Prepara el arranque del motor sin abrir dispositivos de audio.
     ///
     /// Valida el estado, carga el perfil del dispositivo y crea el canal de
     /// eventos. El lock se sostiene solo durante esta operación rápida.
     /// El arranque real (`AudioEngine::start`) se ejecuta en un hilo
     /// separado sin lock para evitar bloquear otros comandos.
+    ///
+    /// Si el `profile_key` tiene un intento huérfano previo (timeout sin
+    /// resolver) y `force` es `false`, devuelve [`StartEngineError::DeviceLikelyStuck`].
     ///
     /// El caller debe pasar el [`PendingStart`] resultante a un hilo que
     /// llame a [`AudioEngine::start`] y luego a [`Self::complete_start`].
@@ -189,15 +239,30 @@ impl EngineManager {
         &mut self,
         config: AudioEngineConfig,
         on_frontend: Option<Arc<FrontendCallback>>,
-    ) -> Result<PendingStart, EngineError> {
+        force: bool,
+    ) -> Result<PendingStart, crate::start_error::StartEngineError> {
         if self.handle.is_some() {
-            return Err(EngineError::AlreadyRunning);
+            return Err(crate::start_error::StartEngineError::AlreadyRunning);
         }
 
         let profile_key = config
             .input_device
             .clone()
             .unwrap_or_else(|| DEFAULT_DEVICE_KEY.to_string());
+
+        // Si hay un intento huérfano previo y el usuario no forzó, bloquear.
+        if let Some(orphan) = self.orphaned_attempts.get(&profile_key) {
+            if !force {
+                return Err(crate::start_error::StartEngineError::DeviceLikelyStuck {
+                    device: profile_key.clone(),
+                    orphaned_at: orphan.orphaned_at,
+                    stuck_count: orphan.stuck_count,
+                });
+            }
+            // force = true: eliminar la entrada huérfana y continuar.
+            self.orphaned_attempts.remove(&profile_key);
+        }
+
         let profile = self.config.config().profile(&profile_key).cloned();
 
         let mut engine_config = config.clone();

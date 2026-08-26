@@ -478,6 +478,34 @@ export default function App() {
             </>
           )}
 
+          {engine.deviceStuckError && (
+            <div className="controls__stuck-banner">
+              <p>
+                <strong>{engine.deviceStuckError.device ?? "Dispositivo"}</strong>{" "}
+                no respondió la última vez y puede seguir ocupado.
+                {engine.deviceStuckError.stuckCount
+                  ? ` (Intentos sin resolver: ${engine.deviceStuckError.stuckCount})`
+                  : ""}
+              </p>
+              <div className="controls__stuck-actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => engine.dismissDeviceStuck()}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--start"
+                  disabled={engine.busy}
+                  onClick={() => engine.retryWithForce()}
+                >
+                  Reintentar
+                </button>
+              </div>
+            </div>
+          )}
           {engine.error && <p className="controls__error">{engine.error}</p>}
           {engine.warning && <p className="controls__warning">{engine.warning}</p>}
         </aside>
