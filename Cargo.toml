@@ -28,3 +28,21 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 rustfft = "6"
+
+# -----------------------------------------------------------------------------
+# Perfil de release del binario que llega a usuarios reales (regla 8 de
+# AGENTS.md): no depender de los valores por defecto de Cargo.
+#  - lto = "fat": LTO completo entre todos los crates del workspace.
+#  - codegen-units = 1: mejor optimización del módulo (a costa de tiempo de
+#    build); combinado con LTO da el binario más rápido y pequeño.
+#  - strip = "symbols": reduce el tamaño del binario final.
+#  Se deja panic en "unwind" (valor por defecto) a propósito: el crate core
+#  también se compila como cdylib/staticlib para FFI, y "abort" rompería la
+#  captura de pánicos a través de esa frontera y los ctest del pipeline de
+#  audio (regla 1/2).
+# -----------------------------------------------------------------------------
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+
