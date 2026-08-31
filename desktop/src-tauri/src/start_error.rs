@@ -36,6 +36,22 @@ pub enum StartEngineError {
     },
 }
 
+impl std::fmt::Display for StartEngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyRunning => write!(f, "el motor de audio ya está en ejecución"),
+            Self::Timeout { device } => match device {
+                Some(d) => write!(f, "{} no respondió a tiempo", d),
+                None => write!(f, "el dispositivo no respondió a tiempo"),
+            },
+            Self::DeviceLikelyStuck { device, .. } => {
+                write!(f, "{} quedó sin resolver (posible cuelgue)", device)
+            }
+            Self::Core { message } => write!(f, "{message}"),
+        }
+    }
+}
+
 impl From<crate::engine::EngineError> for StartEngineError {
     fn from(err: crate::engine::EngineError) -> Self {
         match err {
