@@ -352,7 +352,6 @@ impl AudioEngine {
             ) {
                 Ok(handle) => {
                     denoise_handle = Some(handle);
-                    log::info!("denoise thread spawned (offloaded mode)");
                 }
                 Err(e) => {
                     log::warn!("denoise offload failed, using inline: {e}");
@@ -607,7 +606,6 @@ impl AudioEngine {
                 None,
             )
             .map_err(|e| Error::audio(format!("build output stream: {e}")))?;
-
         // --- Hilo de análisis vocal --------------------------------------------
         // Consume los marcos del callback, desliza la ventana de métricas,
         // evalúa sugerencias y mantiene el resumen de sesión. Aquí (no en el

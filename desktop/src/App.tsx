@@ -14,18 +14,8 @@ import { BufferSelector } from "./components/BufferSelector";
 import { StatusPill } from "./components/StatusPill";
 import { PairingBadge } from "./components/PairingBadge";
 import { PresetCard } from "./components/PresetCard";
-import { DspChain } from "./components/DspChain";
 import { SimplePanel } from "./components/SimplePanel";
-import { EqPanel } from "./components/EqPanel";
-import { GatePanel } from "./components/GatePanel";
-import { DenoisePanel } from "./components/DenoisePanel";
-import { FeedbackPanel } from "./components/FeedbackPanel";
-import { PitchCorrectionPanel } from "./components/PitchCorrectionPanel";
-import { DelayPanel } from "./components/DelayPanel";
-import { ReverbPanel } from "./components/ReverbPanel";
-import { SaturatorPanel } from "./components/SaturatorPanel";
-import { DynamicEqPanel } from "./components/DynamicEqPanel";
-import { HarmonizerPanel } from "./components/HarmonizerPanel";
+import { AdvancedDspPanel } from "./components/AdvancedDspPanel";
 import { SuggestionPanel } from "./components/SuggestionPanel";
 import { FloatingSuggestion } from "./components/FloatingSuggestion";
 import { SpectrumView } from "./components/SpectrumView";
@@ -40,13 +30,6 @@ import brandSecondary from "./assets/brand/brand_secondary.png";
 
 /** Categorías del acordeón en modo Avanzado. */
 type AccordionGroup = "basic" | "dynamics" | "effects" | "creative";
-
-const ACCORDION_GROUPS: { key: AccordionGroup; label: string }[] = [
-  { key: "basic", label: "Procesamiento básico" },
-  { key: "dynamics", label: "Dinámica" },
-  { key: "effects", label: "Efectos" },
-  { key: "creative", label: "Creativos" },
-];
 
 const IS_RUNNING = (state: string | null | undefined) => state === "running";
 
@@ -414,68 +397,24 @@ export default function App() {
               onSetLinkBypass={handleLinkBypass}
             />
           ) : (
-            <>
-              <h2 className="panel__title panel__title--spaced">Cadena DSP</h2>
-              <DspChain
-                dsp={engine.dsp}
-                onGlobalBypass={handleGlobalBypass}
-                onLinkBypass={handleLinkBypass}
-              />
-
-              {ACCORDION_GROUPS.map(({ key, label }) => (
-                <div key={key} className="accordion">
-                  <button
-                    type="button"
-                    className={`accordion__header ${openAccordion === key ? "accordion__header--open" : ""}`}
-                    onClick={() => toggleAccordion(key)}
-                    aria-expanded={openAccordion === key}
-                  >
-                    <span>{label}</span>
-                    <span className="accordion__chevron">{openAccordion === key ? "▾" : "▸"}</span>
-                  </button>
-                  {openAccordion === key && (
-                    <div className="accordion__body">
-                      {key === "basic" && (
-                        <>
-                          <h3 className="panel__subtitle">Ecualizador</h3>
-                          <EqPanel dsp={engine.dsp} running={running} onSetEqBand={handleSetEqBand} />
-                          <h3 className="panel__subtitle">Puerta de ruido</h3>
-                          <GatePanel dsp={engine.dsp} running={running} onSetNoiseGate={handleSetNoiseGate} />
-                          <h3 className="panel__subtitle">Supresión de ruido</h3>
-                          <DenoisePanel dsp={engine.dsp} running={running} onSetDenoise={handleSetDenoise} />
-                          <h3 className="panel__subtitle">Antifeedback</h3>
-                          <FeedbackPanel dsp={engine.dsp} running={running} onSetFeedback={handleSetFeedback} />
-                        </>
-                      )}
-                      {key === "dynamics" && (
-                        <>
-                          <h3 className="panel__subtitle">EQ Dinámico</h3>
-                          <DynamicEqPanel dsp={engine.dsp} running={running} onSetDynamicEq={handleSetDynamicEq} />
-                          <h3 className="panel__subtitle">Corrección tono</h3>
-                          <PitchCorrectionPanel dsp={engine.dsp} running={running} onSetPitchCorrection={handleSetPitchCorrection} />
-                        </>
-                      )}
-                      {key === "effects" && (
-                        <>
-                          <h3 className="panel__subtitle">Delay</h3>
-                          <DelayPanel dsp={engine.dsp} running={running} onSetDelay={handleSetDelay} />
-                          <h3 className="panel__subtitle">Reverb</h3>
-                          <ReverbPanel dsp={engine.dsp} running={running} onSetReverb={handleSetReverb} />
-                          <h3 className="panel__subtitle">Saturación</h3>
-                          <SaturatorPanel dsp={engine.dsp} running={running} onSetSaturator={handleSetSaturator} />
-                        </>
-                      )}
-                      {key === "creative" && (
-                        <>
-                          <h3 className="panel__subtitle">Harmonizer</h3>
-                          <HarmonizerPanel dsp={engine.dsp} running={running} onSetHarmonizer={handleSetHarmonizer} />
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </>
+            <AdvancedDspPanel
+              dsp={engine.dsp}
+              running={running}
+              openAccordion={openAccordion}
+              onToggleAccordion={toggleAccordion}
+              onGlobalBypass={handleGlobalBypass}
+              onLinkBypass={handleLinkBypass}
+              onSetEqBand={handleSetEqBand}
+              onSetNoiseGate={handleSetNoiseGate}
+              onSetDenoise={handleSetDenoise}
+              onSetFeedback={handleSetFeedback}
+              onSetDynamicEq={handleSetDynamicEq}
+              onSetPitchCorrection={handleSetPitchCorrection}
+              onSetDelay={handleSetDelay}
+              onSetReverb={handleSetReverb}
+              onSetSaturator={handleSetSaturator}
+              onSetHarmonizer={handleSetHarmonizer}
+            />
           )}
 
           {engine.deviceStuckError && (

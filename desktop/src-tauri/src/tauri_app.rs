@@ -71,6 +71,11 @@ pub struct AppState {
     pub pairing_events: broadcast::Sender<String>,
     /// Anuncio mDNS del escritorio (`_voxlfa._tcp.local.`) para que el móvil lo
     /// descubra; `None` si no se pudo publicar.
+    ///
+    /// No se lee nunca: se retiene únicamente por su efecto RAII (mantener vivo
+    /// el `ServiceDaemon` publicando el servicio mientras la app corre; al
+    /// soltarse se retira el anuncio).
+    #[allow(dead_code)]
     pub mdns: Option<MdnsAdvertiser>,
     /// Receptor de eventos de telemetría (para enviar al backend de telemetría).
     telemetry_rx: std::sync::Mutex<Option<telemetry::TelemetryReceiver>>,
@@ -286,6 +291,10 @@ fn start_engine(
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => Err(e),
         Err(_timeout) => {
+            log::warn!(
+                "[start_engine] se alcanzó el timeout de {}s",
+                STARTUP_TIMEOUT_SECS
+            );
             // Señalar al hilo de apertura que descarte el resultado.
             cancel.store(true, Ordering::Relaxed);
 
@@ -648,6 +657,7 @@ fn get_model_status() -> Result<voxlfa_core::models::ModelStatus, String> {
 async fn download_models(app: AppHandle) -> Result<voxlfa_core::models::ModelStatus, String> {
     #[cfg(not(feature = "onnx"))]
     {
+        let _ = &app;
         return Err("Models feature (onnx) is disabled in this build".to_string());
     }
 
@@ -694,6 +704,11 @@ fn get_pairing_info(state: State<AppState>) -> Result<PairingInfo, String> {
 pub fn run() {
     // Cargar .env del directorio de trabajo antes de leer variables de entorno.
     dotenvy::dotenv().ok();
+    // Inicializar logging. Con `RUST_LOG=debug` se ven los detalles de
+    // enumeración de dispositivos; por defecto, solo info/warn/error.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format_timestamp(None)
+        .init();
 
     let builder = tauri::Builder::default()
         .manage(AppState::new())

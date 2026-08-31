@@ -4,6 +4,42 @@
 // (estado, niveles, dispositivos, avisos) y expone acciones tipadas.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+
+/**
+ * Acumula las actualizaciones de alta frecuencia (nivel/espectro) y las
+ * descarga una sola vez por frame de pantalla mediante `requestAnimationFrame`.
+ *
+ * El motor emite nivel y espectro a 20 Hz cada uno (~42 actualizaciones/s
+ * combinadas). Sin este throttle, cada evento descarga un re-render de todo el
+ * árbol de la cabina (dial, espectro y módulos DSP), lo que en webviews sin
+ * aceleración por hardware deja la ventana trabada. Al limitarlo a un
+ * re-render por frame (~60 Hz máx, y a menudo menos), se conserva la fluidez
+ * de los medidores sin ahogar el render.
+ */
+function useThrottledMeter<T>(initial: T | null): [T | null, (v: T | null) => void] {
+  const [value, setValue] = useState<T | null>(initial);
+  const pendingRef = useRef<T | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const schedule = useCallback((v: T | null) => {
+    pendingRef.current = v;
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const next = pendingRef.current;
+      pendingRef.current = null;
+      setValue(next);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  return [value, schedule];
+}
 import type {
   AnalysisSample,
   AppConfig,
@@ -188,8 +224,10 @@ function parseStartError(err: unknown): StartEngineError | null {
  */
 export function useEngine(): EngineController {
   const [status, setStatus] = useState<EngineStatus | null>(null);
-  const [level, setLevel] = useState<LevelSample | null>(null);
-  const [spectrum, setSpectrum] = useState<SpectrumSample | null>(null);
+  // Nivel y espectro son actualizaciones de alta frecuencia: se baten para
+  // descargarlas una vez por frame y evitar re-renders que traban la ventana.
+  const [level, setLevel] = useThrottledMeter<LevelSample>(null);
+  const [spectrum, setSpectrum] = useThrottledMeter<SpectrumSample>(null);
   const [devices, setDevices] = useState<DeviceList | null>(null);
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   const [presets, setPresets] = useState<PresetInfo[] | null>(null);

@@ -10,6 +10,7 @@
 # Features:
 #   * `webview` (default): integración completa con Tauri (ventana + UI).
 #     Requiere las librerías de webview del sistema (webkit2gtk-4.1 en Linux).
+#   * `onnx` (default): descarga/uso de modelos ONNX. Se reenvía al core.
 #   * sin `webview`: compila solo el "shell" de backend (emparejamiento,
 #     WebSocket y gestión del motor). Permite testear la lógica sin Tauri.
 # -----------------------------------------------------------------------------
@@ -27,8 +28,9 @@ name = "voxlfa_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["webview"]
+default = ["webview", "onnx"]
 webview = ["dep:tauri", "dep:tauri-build"]
+onnx = ["voxlfa-core/onnx"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -37,7 +39,7 @@ tauri-build = { version = "2", features = [], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-voxlfa-core = { path = "../../core", features = ["audio", "rnnoise", "onnx"] }
+voxlfa-core = { path = "../../core", features = ["audio", "rnnoise"] }
 
 tauri = { version = "2", features = [], optional = true }
 
@@ -58,5 +60,6 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 # Utilities
 log = "0.4"
+env_logger = "0.11"
 once_cell = "1.20"
 dotenvy = "0.15"
