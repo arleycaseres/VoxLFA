@@ -192,6 +192,14 @@ fn start_engine(
     force: Option<bool>,
 ) -> Result<(), String> {
     let force = force.unwrap_or(false);
+    log::info!(
+        "[start_engine] solicitud: input={input:?}, output={output:?}, \
+         audio_host={audio_host:?}, buffer={buffer_size:?}, force={force}",
+        input = input_device,
+        output = output_device,
+        audio_host = audio_host,
+        buffer_size = buffer_size,
+    );
 
     // --- Fase 1: validar y preparar (bajo lock, operación rápida) -----------
     let mut pending = {
@@ -285,6 +293,8 @@ fn start_engine(
             }
         })
         .map_err(|e| e.to_string())?;
+
+    log::info!("[start_engine] hilo de apertura lanzado, esperando resultado…");
 
     // --- Fase 3: esperar con timeout -----------------------------------------
     match result_rx.recv_timeout(Duration::from_secs(STARTUP_TIMEOUT_SECS)) {

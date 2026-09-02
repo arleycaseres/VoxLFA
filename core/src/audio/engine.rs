@@ -257,15 +257,22 @@ impl AudioEngine {
         config: AudioEngineConfig,
         tx: mpsc::Sender<EngineEvent>,
     ) -> Result<(EngineHandle, DspHandle, AnalysisHandle)> {
+        let t_start = std::time::Instant::now();
+        let log = |what: &str| {
+            log::info!("[start] {what} (elapsed {:?})", t_start.elapsed());
+        };
+        log("comienzo de AudioEngine::start");
         // Resolver el host de audio: el elegido o el predeterminado del sistema.
         let host = match &config.audio_host {
             Some(host_id) => resolve_host(host_id)?,
             None => cpal::default_host(),
         };
+        log("host resuelto");
 
         // Resolver dispositivos: por nombre o los predeterminados del host.
         let input = resolve_device(&host, config.input_device.as_deref(), Direction::Input)?;
         let output = resolve_device(&host, config.output_device.as_deref(), Direction::Output)?;
+        log("dispositivos resueltos");
 
         let input_name = input.name().unwrap_or_else(|_| "input".to_string());
         let output_name = output.name().unwrap_or_else(|_| "output".to_string());
@@ -388,6 +395,7 @@ impl AudioEngine {
         let mut last_spectrum_emit = Instant::now();
         let tx_spectrum = tx.clone();
 
+        log("config de streams lista");
         let input_stream = input
             .build_input_stream::<f32, _, _>(
                 &input_config,
@@ -564,6 +572,7 @@ impl AudioEngine {
                 None,
             )
             .map_err(|e| Error::audio(format!("build input stream: {e}")))?;
+        log("stream de ENTRADA abierto OK");
 
         // --- Stream de salida (playback) -------------------------------------
         let mut underflow_warned = false;
@@ -606,6 +615,7 @@ impl AudioEngine {
                 None,
             )
             .map_err(|e| Error::audio(format!("build output stream: {e}")))?;
+        log("stream de SALIDA abierto OK");
         // --- Hilo de análisis vocal --------------------------------------------
         // Consume los marcos del callback, desliza la ventana de métricas,
         // evalúa sugerencias y mantiene el resumen de sesión. Aquí (no en el
@@ -702,6 +712,7 @@ impl AudioEngine {
             })?;
 
         let analysis_handle = AnalysisHandle::new(analysis_shared, dsp_handle.clone());
+        log("hilo del motor lanzado");
 
         Ok((
             EngineHandle {
