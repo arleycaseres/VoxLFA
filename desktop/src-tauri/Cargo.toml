@@ -63,3 +63,8 @@ log = "0.4"
 env_logger = "0.11"
 once_cell = "1.20"
 dotenvy = "0.15"
+
+# Asignador global mimalloc: reduce la fragmentación de memoria por
+# asignación/liberación repetida de buffers de tamaño variable (presets con
+# Harmonizer/Reverb/Delay). No cambia lógica; solo el allocator del binario.
+mimalloc = "0.1"

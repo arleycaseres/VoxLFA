@@ -37,6 +37,10 @@ rnnoise = ["dep:nnnoiseless"]
 # Supresión de ruido con ONNX Runtime + DeepFilterNet3 (mejor calidad, más
 # peso). Requiere descargar binarios de ONNX Runtime en la primera compilación.
 onnx = ["dep:ort", "dep:ndarray", "dep:ureq"]
+# Herramienta de benchmark: activa mimalloc como allocator global en el
+# binario de ejemplo `preset_rss_bench` para comparar RSS contra glibc.
+# No afecta a los builds de producción (default = []).
+bench-mimalloc = ["dep:mimalloc"]
 
 [dependencies]
 serde.workspace = true
@@ -51,3 +55,8 @@ nnnoiseless = { version = "0.5", optional = true }
 ort = { version = "=2.0.0-rc.13", features = ["download-binaries"], optional = true }
 ndarray = { version = "0.17", optional = true }
 ureq = { version = "3", optional = true }
+
+# Asignador mimalloc, solo para el binario de benchmark (feature
+# `bench-mimalloc`). Permite comparar RSS contra el allocator por defecto
+# (glibc) sin tocar la lógica de negocio.
+mimalloc = { version = "0.1", optional = true }
