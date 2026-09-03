@@ -266,9 +266,24 @@ fn start_engine(
                 configs_to_try.push((c, original_tx.as_ref().map(|tx| tx.clone())));
             }
 
+            // Buffer grande (1024) para USB problemáticos
             {
                 let mut c = original_config.clone().unwrap_or_default();
                 c.buffer_size = Some(1024);
+                let dominated = configs_to_try
+                    .iter()
+                    .any(|(cfg, _)| cfg.buffer_size == c.buffer_size);
+                if !dominated {
+                    configs_to_try
+                        .push((c, original_tx.as_ref().map(|tx| tx.clone())));
+                }
+            }
+
+            // Buffer extra grande (2048) para dispositivos USB muy inestables
+            // (p. ej. codecs Burr-Brown que rechazan POLLERR con buffers menores)
+            {
+                let mut c = original_config.clone().unwrap_or_default();
+                c.buffer_size = Some(2048);
                 let dominated = configs_to_try
                     .iter()
                     .any(|(cfg, _)| cfg.buffer_size == c.buffer_size);
@@ -308,15 +323,13 @@ fn start_engine(
                     }
                     Err(e) => {
                         let err_str = e.to_string();
-                        let is_stream_err = err_str.contains("build input stream")
-                            || err_str.contains("build output stream");
+                        let is_stream_err = err_str.contains("input stream")
+                            || err_str.contains("output stream");
                         log::warn!(
                             "[start_engine] intento {} falló{}: {err_str}",
                             attempt + 1,
                             if is_stream_err { " (stream build)" } else { "" },
                         );
-                        // Si el error NO es de stream build, no tiene sentido
-                        // reintentar con otra config — propagar de inmediato.
                         if !is_stream_err {
                             break;
                         }

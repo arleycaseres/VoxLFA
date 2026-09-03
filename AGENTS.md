@@ -54,6 +54,23 @@ cargo test --workspace --no-default-features
 - La lógica de audio en los callbacks de cpal **no asigna memoria** ni hace
   operaciones lentas (bloqueos de mutex largos, syscalls de I/O): se acumula y
   se envía por canal a un hilo dedicado.
+- **Verificar tipos contra signatures antes de escribir código.** Si la función
+  recibe `Sender<X>`, no pongas `Option<String>` en la tupla. Releer la
+  signature de la función destino antes de construir los argumentos.
+- **Antes de commit, releer el diff completo** buscando errores obvios de tipos,
+  variables sin usar, y lógica incorrecta. No asumir que el código compila solo
+  porque lo escribí.
+
+### Errores conocidos de cpal/ALSA
+
+- `snd_pcm_hw_params_set_buffer_size` → `EINVAL (22)`: el driver ALSA rechaza
+  un buffer size que cpal reporta como válido (desalineación de periodos). Fix:
+  retry automático con `BufferSize::Default` en `start_engine` (ya implementado).
+- `alsa::poll()` → `POLLERR`: dispositivo USB incompatible con ALSA directo o
+  driver en mal estado. Fix: retry con buffer grande (1024) en cascada.
+- Dispositivos USB genéricos (codec, Burr-Brown, etc.) son propensos a estos
+  errores. El retry en cascada en `start_engine` las maneja automáticamente:
+  heurístico → default → 1024.
 
 ### TypeScript / React (`desktop/src`)
 
@@ -88,6 +105,12 @@ Sin `webkit2gtk-4.1`, sustituir los pasos 2 y 3 por la variante
 Los cambios de `desktop/src-tauri/src/tauri_app.rs` (feature `webview`) no se
 compilan en entornos sin webkit: revísalos con especial cuidado o en una
 máquina con las dependencias del sistema instaladas.
+
+**IMPORTANTE:** cuando no puedes compilar con `--features webview` (entorno
+sin webkit), los tipos en `tauri_app.rs` **no se verifican** con clippy. En
+ese caso, **releer cada tipo manualmente contra la signature de la función
+destino** antes de escribir. Ejemplo: si `AudioEngine::start` recibe
+`mpsc::Sender<EngineEvent>`, no escribas `Option<String>` en la tupla.
 
 ## Seguridad (resumen)
 
