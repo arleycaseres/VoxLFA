@@ -246,50 +246,75 @@ fn start_engine(
             let original_config = pending.engine_config.clone();
             let original_tx = pending.event_tx.clone();
 
-            // Construir lista de configs a intentar en cascada:
-            // 1. Config original (buffer heurístico)
-            // 2. Buffer por defecto (si se usó heurística)
-            // 3. Buffer grande 1024 (USB problemáticos que rechazan tanto
-            //    el heurístico como el default, p. ej. codecs TI/Burr-Brown)
+            // Construir lista de configs a intentar en cascada.
+            //
+            // Orden de prioridad, del más deseado al más defensivo:
+            //   1. Config original (buffer heurístico, host tal cual)
+            //   2. Mismo host, BufferSize::Default
+            //   3. Mismo host, buffer grande 1024
+            //   4. Mismo host, buffer extra grande 2048
+            //   5. Otros hosts disponibles (pulseaudio, pipewire, jack):
+            //      ALSA directo a veces no puede leer codecs USB (POLLERR);
+            //      el servidor de audio (PA/PW) los maneja bien.
+            //
+            // Cada host se prueba con buffer grande (1024) y default (None)
+            // para maximizar probabilidad de éxito.
+            //
+            // Los intentos con el MISMO (host, buffer) se deduplican para no
+            // abrir el dispositivo dos veces con la misma config.
             let mut configs_to_try: Vec<(
                 voxlfa_core::audio::AudioEngineConfig,
                 Option<mpsc::Sender<EngineEvent>>,
             )> = Vec::new();
 
-            if let Some(config) = pending.engine_config.take() {
-                configs_to_try.push((config, pending.event_tx.take()));
+            let mut seen: Vec<(Option<String>, Option<usize>)> = Vec::new();
+            let mut push_cfg =
+                |config: &voxlfa_core::audio::AudioEngineConfig,
+                 tx: &Option<mpsc::Sender<EngineEvent>>| {
+                    let key = (config.audio_host.clone(), config.buffer_size);
+                    if seen.contains(&key) {
+                        return;
+                    }
+                    seen.push(key);
+                    configs_to_try.push((config.clone(), tx.clone()));
+                };
+
+            if let Some(cfg) = original_config.as_ref() {
+                push_cfg(cfg, &original_tx);
             }
 
-            if original_config.as_ref().and_then(|c| c.buffer_size).is_some() {
-                let mut c = original_config.clone().unwrap();
-                c.buffer_size = None;
-                configs_to_try.push((c, original_tx.as_ref().map(|tx| tx.clone())));
-            }
-
-            // Buffer grande (1024) para USB problemáticos
-            {
+            // Host original con distintos buffers.
+            for buf in [None, Some(1024), Some(2048)] {
                 let mut c = original_config.clone().unwrap_or_default();
-                c.buffer_size = Some(1024);
-                let dominated = configs_to_try
-                    .iter()
-                    .any(|(cfg, _)| cfg.buffer_size == c.buffer_size);
-                if !dominated {
-                    configs_to_try
-                        .push((c, original_tx.as_ref().map(|tx| tx.clone())));
+                c.buffer_size = buf;
+                push_cfg(&c, &original_tx);
+            }
+
+            // Otros hosts disponibles con buffer defensivo.
+            // IMPORTANTE: los device names que elige el usuario pertenecen al
+            // host original (ALSA). Un mismo dispositivo físico se enumera con
+            // nombres distintos según el host (p. ej. "USB Audio CODEC" en ALSA
+            // vs "alsa_input.usb-..." en PA/PW). Por eso, al cambiar de host
+            // usamos los dispositivos por defecto de ese host (None), que en la
+            // práctica apuntan al mismo dispositivo del sistema.
+            let available_hosts: Vec<String> = voxlfa_core::audio::AudioEngine::list_hosts()
+                .map(|(hosts, _)| hosts.into_iter().map(|h| h.id).collect())
+                .unwrap_or_default();
+            let original_host = original_config
+                .as_ref()
+                .and_then(|c| c.audio_host.clone())
+                .unwrap_or_default();
+            for host_id in available_hosts {
+                if host_id == original_host {
+                    continue;
                 }
-            }
-
-            // Buffer extra grande (2048) para dispositivos USB muy inestables
-            // (p. ej. codecs Burr-Brown que rechazan POLLERR con buffers menores)
-            {
-                let mut c = original_config.clone().unwrap_or_default();
-                c.buffer_size = Some(2048);
-                let dominated = configs_to_try
-                    .iter()
-                    .any(|(cfg, _)| cfg.buffer_size == c.buffer_size);
-                if !dominated {
-                    configs_to_try
-                        .push((c, original_tx.as_ref().map(|tx| tx.clone())));
+                for buf in [Some(1024), None] {
+                    let mut c = original_config.clone().unwrap_or_default();
+                    c.audio_host = Some(host_id.clone());
+                    c.buffer_size = buf;
+                    c.input_device = None;
+                    c.output_device = None;
+                    push_cfg(&c, &original_tx);
                 }
             }
 
@@ -318,13 +343,16 @@ fn start_engine(
 
                 match core_result.as_ref().unwrap() {
                     Ok(_) => {
-                        log::info!("[start_engine] arranque completado en intento {}", attempt + 1);
+                        log::info!(
+                            "[start_engine] arranque completado en intento {}",
+                            attempt + 1
+                        );
                         break;
                     }
                     Err(e) => {
                         let err_str = e.to_string();
-                        let is_stream_err = err_str.contains("input stream")
-                            || err_str.contains("output stream");
+                        let is_stream_err =
+                            err_str.contains("input stream") || err_str.contains("output stream");
                         log::warn!(
                             "[start_engine] intento {} falló{}: {err_str}",
                             attempt + 1,
@@ -349,7 +377,9 @@ fn start_engine(
             }
 
             let core_result = core_result.unwrap_or_else(|| {
-                Err(voxlfa_core::Error::audio("no se realizó ningún intento de arranque"))
+                Err(voxlfa_core::Error::audio(
+                    "no se realizó ningún intento de arranque",
+                ))
             });
 
             match core_result {

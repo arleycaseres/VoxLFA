@@ -67,10 +67,24 @@ cargo test --workspace --no-default-features
   un buffer size que cpal reporta como válido (desalineación de periodos). Fix:
   retry automático con `BufferSize::Default` en `start_engine` (ya implementado).
 - `alsa::poll()` → `POLLERR`: dispositivo USB incompatible con ALSA directo o
-  driver en mal estado. Fix: retry con buffer grande (1024) en cascada.
+  driver en mal estado. **Puede ser asíncrono**: el stream se abre con éxito
+  (`build_input_stream` OK) y el fallo llega después por el callback de error
+  `move |err| { ... "input stream" ... }`. Un check solo sobre errores de build
+  **no** lo detecta.
+  - Fix síncrono (build): retry en cascada con buffer grande (1024/2048).
+  - Fix asíncrono: el **probe de arranque** en `AudioEngine::start`
+    (`core/src/audio/engine.rs`, `STARTUP_PROBE_MS`, 500 ms) reutiliza el canal
+    de errores de los streams (`probe_tx`). Si el callback emite un error
+    dentro de la ventana, `start` devuelve `Err` en vez de éxito, y la cascada
+    de `start_engine` reintenta.
 - Dispositivos USB genéricos (codec, Burr-Brown, etc.) son propensos a estos
   errores. El retry en cascada en `start_engine` las maneja automáticamente:
-  heurístico → default → 1024.
+  heurístico → default → 1024 → 2048 → y luego **otros hosts** (pulseaudio,
+  pipewire, jack) con los dispositivos por defecto de ese host (los nombres de
+  dispositivo cambian según el host, así que al cambiar de backend se usan los
+  defaults, `input_device=None`/`output_device=None`). El `probe_tx`/`probe_rx`
+  viven solo en `start`; **no** añadir I/O ni locks largos en los callbacks de
+  error — solo `swap` + `send` por canal sin espera.
 
 ### TypeScript / React (`desktop/src`)
 

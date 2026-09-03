@@ -47,6 +47,16 @@ use crate::Result;
 /// backlog de latencia (unas pocas decenas de ms).
 const RING_CAPACITY_SECS: u32 = 2;
 
+/// Ventana de verificación de arranque (probe).
+///
+/// Algunos dispositivos (p. ej. codecs USB con ALSA directo) *abren* el stream
+/// pero fallan en runtime inmediatamente después (p. ej. `POLLERR`). Este probe
+/// espera esta ventana tras lanzar el hilo del motor; si el callback de error
+/// de algún stream emite un fallo en ese lapso, `AudioEngine::start` devuelve
+/// error en lugar de éxito, de modo que la capa superior puede reintentar con
+/// otro host de audio (PulseAudio/PipeWire) o buffer.
+const STARTUP_PROBE_MS: Duration = Duration::from_millis(500);
+
 /// Intervalo mínimo entre muestras de nivel emitidas a la UI (evita saturar
 /// el canal y el frontend con decenas de miles de eventos por segundo).
 const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(50);
@@ -383,6 +393,19 @@ impl AudioEngine {
         let stop_capture = stop.clone();
         let last_latency_in = last_latency.clone();
 
+        // Canal para el probe de arranque: los callbacks de error de los
+        // streams lo usan para notificar fallos de runtime tempranos (POLLERR
+        // u otros). El hilo de `start` lo consume con timeout en la ventana de
+        // verificación; si algo llega, aborta el arranque.
+        let (probe_tx, probe_rx) = mpsc::channel::<String>();
+        // Solo el primer fallo se notifica (evita spammear el canal).
+        let probe_fired = Arc::new(AtomicBool::new(false));
+        // Clones para los callbacks de error de input/output.
+        let probe_tx_in = probe_tx.clone();
+        let probe_fired_in = probe_fired.clone();
+        let probe_tx_out = probe_tx;
+        let probe_fired_out = probe_fired;
+
         // Análisis vocal: divisor de bandas del callback + canal hacia el hilo.
         let mut splitter = BandSplitter::new(sample_rate);
         let mut last_frame_emit = Instant::now();
@@ -568,6 +591,9 @@ impl AudioEngine {
                     let _ = tx_capture_errors.send(EngineEvent::Warning {
                         message: format!("input stream: {err}"),
                     });
+                    if !probe_fired_in.swap(true, Ordering::Relaxed) {
+                        let _ = probe_tx_in.send(format!("input stream: {err}"));
+                    }
                 },
                 None,
             )
@@ -611,6 +637,9 @@ impl AudioEngine {
                     let _ = tx_output_errors.send(EngineEvent::Warning {
                         message: format!("output stream: {err}"),
                     });
+                    if !probe_fired_out.swap(true, Ordering::Relaxed) {
+                        let _ = probe_tx_out.send(format!("output stream: {err}"));
+                    }
                 },
                 None,
             )
@@ -713,6 +742,27 @@ impl AudioEngine {
 
         let analysis_handle = AnalysisHandle::new(analysis_shared, dsp_handle.clone());
         log("hilo del motor lanzado");
+
+        // --- Probe de arranque -----------------------------------------------
+        // Espera un breve lapso tras lanzar el motor para detectar fallos de
+        // runtime tempranos de los streams (p. ej. `POLLERR` en codecs USB con
+        // ALSA directo). Si ocurren, abortamos y devolvemos error para que la
+        // capa superior reintente con otro host de audio.
+        if let Ok(reason) = probe_rx.recv_timeout(STARTUP_PROBE_MS) {
+            log::warn!("[start] el stream falló justo tras arrancar: {reason}");
+            // Detener el motor y la cadena denoise; los streams viven en el
+            // hilo del motor, así que al unirlo se cierran.
+            stop.store(true, Ordering::Relaxed);
+            stop_denoise.store(true, Ordering::Relaxed);
+            let _ = thread.join();
+            drop(analysis_handle);
+            drop(dsp_handle);
+            return Err(Error::audio(format!(
+                "stream failed shortly after start: {reason} — \
+                 el dispositivo puede requerir otro host de audio \
+                 (p. ej. PulseAudio/PipeWire) o un buffer mayor"
+            )));
+        }
 
         Ok((
             EngineHandle {
