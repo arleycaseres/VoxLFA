@@ -243,26 +243,101 @@ fn start_engine(
     std::thread::Builder::new()
         .name("voxlfa-engine-start".to_string())
         .spawn(move || {
-            let core_result = voxlfa_core::audio::AudioEngine::start(
-                pending
-                    .engine_config
-                    .take()
-                    .expect("engine_config already taken"),
-                pending.event_tx.take().expect("event_tx already taken"),
-            );
+            let original_config = pending.engine_config.clone();
+            let original_tx = pending.event_tx.clone();
+
+            // Construir lista de configs a intentar en cascada:
+            // 1. Config original (buffer heurístico)
+            // 2. Buffer por defecto (si se usó heurística)
+            // 3. Buffer grande 1024 (USB problemáticos que rechazan tanto
+            //    el heurístico como el default, p. ej. codecs TI/Burr-Brown)
+            let mut configs_to_try: Vec<(
+                voxlfa_core::audio::AudioEngineConfig,
+                Option<mpsc::Sender<EngineEvent>>,
+            )> = Vec::new();
+
+            if let Some(config) = pending.engine_config.take() {
+                configs_to_try.push((config, pending.event_tx.take()));
+            }
+
+            if original_config.as_ref().and_then(|c| c.buffer_size).is_some() {
+                let mut c = original_config.clone().unwrap();
+                c.buffer_size = None;
+                configs_to_try.push((c, original_tx.as_ref().map(|tx| tx.clone())));
+            }
+
+            {
+                let mut c = original_config.clone().unwrap_or_default();
+                c.buffer_size = Some(1024);
+                let dominated = configs_to_try
+                    .iter()
+                    .any(|(cfg, _)| cfg.buffer_size == c.buffer_size);
+                if !dominated {
+                    configs_to_try
+                        .push((c, original_tx.as_ref().map(|tx| tx.clone())));
+                }
+            }
+
+            let total = configs_to_try.len();
+            let mut core_result = None;
+
+            for (attempt, (config, tx)) in configs_to_try.into_iter().enumerate() {
+                if cancel_clone.load(Ordering::Relaxed) {
+                    return;
+                }
+
+                let Some(tx) = tx else { continue };
+
+                log::info!(
+                    "[start_engine] intento {}/{}: host={:?}, buffer={:?}, \
+                     input={:?}, output={:?}",
+                    attempt + 1,
+                    total,
+                    config.audio_host,
+                    config.buffer_size,
+                    config.input_device,
+                    config.output_device,
+                );
+
+                core_result = Some(voxlfa_core::audio::AudioEngine::start(config, tx));
+
+                match core_result.as_ref().unwrap() {
+                    Ok(_) => {
+                        log::info!("[start_engine] arranque completado en intento {}", attempt + 1);
+                        break;
+                    }
+                    Err(e) => {
+                        let err_str = e.to_string();
+                        let is_stream_err = err_str.contains("build input stream")
+                            || err_str.contains("build output stream");
+                        log::warn!(
+                            "[start_engine] intento {} falló{}: {err_str}",
+                            attempt + 1,
+                            if is_stream_err { " (stream build)" } else { "" },
+                        );
+                        // Si el error NO es de stream build, no tiene sentido
+                        // reintentar con otra config — propagar de inmediato.
+                        if !is_stream_err {
+                            break;
+                        }
+                    }
+                }
+            }
 
             // Si alguien ya canceló (timeout o startup más reciente), limpiar.
             if cancel_clone.load(Ordering::Relaxed) {
-                if let Ok((handle, dsp, analysis)) = core_result {
+                if let Some(Ok((handle, dsp, analysis))) = core_result {
                     drop(dsp);
                     drop(analysis);
                     handle.request_stop();
                     let _ = handle.join();
                 }
-                // El hilo terminó después del timeout pero fue cancelado.
-                // No limpiamos el huérfano aquí porque fue cancelación explícita.
                 return;
             }
+
+            let core_result = core_result.unwrap_or_else(|| {
+                Err(voxlfa_core::Error::audio("no se realizó ningún intento de arranque"))
+            });
 
             match core_result {
                 Ok((handle, dsp, analysis)) => {
