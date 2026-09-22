@@ -140,6 +140,64 @@ mod tests {
     }
 
     #[test]
+    fn cuts_a_single_band() {
+        // Asimétrico con el boost: una banda a −12 dB debe atenuar el seno en
+        // su frecuencia central ~10^(−12/20), no realzar.
+        let sr = 48_000;
+        let mut eq = ParametricEq::new(
+            vec![EqBand {
+                kind: EqBandKind::Peaking,
+                freq_hz: 1000.0,
+                gain_db: -12.0,
+                q: 4.0,
+            }],
+            sr,
+            4096,
+        );
+        let n = 4096;
+        let input: Vec<f32> = (0..n)
+            .map(|i| (2.0 * PI * 1000.0 * i as f32 / sr as f32).sin() * 0.1)
+            .collect();
+        let mut out = vec![0.0; n];
+        let info = ProcessingInfo {
+            sample_rate: sr,
+            frames: n,
+        };
+        eq.process(&input, &mut out, &info);
+        let gain = rms(&out[n / 2..]) / rms(&input[n / 2..]);
+        let expected = 10f32.powf(-12.0 / 20.0);
+        assert!((gain - expected).abs() < 0.4, "gain {gain:.2}");
+    }
+
+    #[test]
+    fn zero_gain_band_is_identity() {
+        // Una banda a 0 dB en el EQ es neutral (H(z) ≡ 1): no altera la señal,
+        // incluso para un Peaking con Q agresivo.
+        let sr = 48_000;
+        let mut eq = ParametricEq::new(
+            vec![EqBand {
+                kind: EqBandKind::Peaking,
+                freq_hz: 1000.0,
+                gain_db: 0.0,
+                q: 10.0,
+            }],
+            sr,
+            4096,
+        );
+        let n = 4096;
+        let input: Vec<f32> = (0..n).map(|i| (i as f32 * 0.13).sin() * 0.5).collect();
+        let mut out = vec![0.0; n];
+        let info = ProcessingInfo {
+            sample_rate: sr,
+            frames: n,
+        };
+        eq.process(&input, &mut out, &info);
+        for (a, b) in input.iter().zip(out.iter()) {
+            assert!((a - b).abs() < 1e-4, "banda 0 dB altera la señal");
+        }
+    }
+
+    #[test]
     fn empty_eq_passes_through() {
         let mut eq = ParametricEq::new(vec![], 48_000, 64);
         let mut out = [0.0; 3];

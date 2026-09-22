@@ -570,7 +570,7 @@ fundamental), end-to-end en core, escritorio y móvil.
 >       voz en tiempo real, end-to-end (core, escritorio, móvil)
 > - **Fase 13** (futuro): Corrección adaptativa de sala, Mejora vocal con IA
 
-## Auditoría DSP — sonido correcto por defecto ✅ (Lotes 1-2)
+## Auditoría DSP — sonido correcto por defecto ✅ (Lotes 1-3)
 
 Objetivo: recorrer la cadena DSP con **criterio de ingeniero de audio** (no solo
 de programador) y corregir bugs donde el código compila y pasa tests pero la
@@ -589,9 +589,13 @@ hallazgos y estándares en `docs/dsp-auditoria.md`.
         clamp), `saturator` (`tanh` en vez de `exp`), cotas OOM en
         `delay`/`reverb` (`ms_to_samples` con NaN→0 y tope).
       - 12 tests de regresión nuevos que demuestran el comportamiento audible.
-- [ ] **Lote 3 — Bandas con ganancia real (EQ/Sculpt/Presets)**: verificar que
-      cada `Peaking`/shelf tiene `gain_db ≠ 0` y suena a lo que promete.
+- [x] **Lote 3 — Bandas con ganancia real (EQ/Sculpt/Presets)**: verificado que
+      cada `Peaking`/shelf de presets/EQ/Sculpt tiene `gain_db ≠ 0` y suena a lo
+      que promete (bandas 0 dB = identidad exacta en el EQ). Fix:
+      `Sculpt::update_params` no rediseñaba los biquads (estado inconsistente).
+      Tests: `cuts_a_single_band`, `zero_gain_band_is_identity`,
+      `update_params_rebuilds_filters`.
 - [ ] **Lote 4 — Estabilidad de Feedback/Denoise/Pitch/VocalIsolation**:
       revisar clamps y reinicialización en los módulos con mayor estado interno.
-- [x] Verificación completa (fmt, clippy `-D warnings`, **222 tests**, build
+- [x] Verificación completa (fmt, clippy `-D warnings`, **225 tests**, build
       desktop, tsc móvil).

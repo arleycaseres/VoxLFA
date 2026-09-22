@@ -69,7 +69,7 @@ lote*:
 | --- | --- | --- |
 | Lote 1 | Bugs de robustez arrastrados de entregas anteriores | ✅ |
 | Lote 2 | Bandas identidad, doble procesado, limiter sin release, clamps/OOM | ✅ |
-| Lote 3 | EQ/Sculpt: verificación de bandas con ganancia real | pendiente |
+| Lote 3 | EQ/Sculpt: verificación de bandas con ganancia real | ✅ |
 | Lote 4 | Feedback, denoise, pitch/vocal isolation: revisión de estabilidad | pendiente |
 
 Cada lote nuevo debe **recorrer todos los módulos** con la metodología de arriba
@@ -145,6 +145,27 @@ buffer de cientos de GB → OOM; NaN → 0 con buffer mínimo o comportamiento r
 antes. El caller (protocolo) manda valores arbitrarios; el DSP es la última
 línea de defensa.
 
+### Guild de ganancia real (`eq.rs`, `sculpt.rs`)
+
+**Síntoma**: un `update_params` que guarda params pero no rediseña los biquads
+deja filtros con coeficientes del tono anterior (estado inconsistente).
+
+- `eq.rs`: verificado que las bandas a 0 dB son identidad exacta (por diseño del
+  cookbook RBJ con `A = 1`), así que una banda neutral no altera el resto del
+  espectro. Tests: `cuts_a_single_band` (asimetría de boost, −12 dB atenúa de
+  verdad) y `zero_gain_band_is_identity`.
+- `sculpt.rs`: `update_params()` solo asignaba `self.params = params` sin
+  reconstruir `bass`/`presence`/`air` → tras un update el `process` decidía el
+  passthrough con el tono nuevo pero filtraba con los coeficientes del tono
+  viejo (en la cadena real se reconstruye vía `SetLinkSculpt`, pero la API
+  pública quedaba inconsistente). Fix: `update_params` re-diseña todos los
+  filtros. Test: `update_params_rebuilds_filters` (falla con el bug: construye
+  neutro y espera que update a brillante filtre).
+
+**Regla derivada**: si `process` toma decisiones según `self.params`, cada
+`update_params` debe mantener los coeficientes coherentes con esos params;
+nunca dejar un procesador que "dice" una configuración y "suena" con otra.
+
 ## Estándares de los tests de regresión DSP
 
 El objetivo de cada fix "correcto por defecto" es que su test **demuestre el
@@ -165,9 +186,10 @@ transitorios de filtro.
 
 ## Cómo continuar
 
-- Los Lotes 3 y 4 están pendientes. Al abrirlos, cargar este documento y la
-  metodología de arriba, recorrer los módulos con criterio de audio y cerrar con
-  la batería de verificación completa de `AGENTS.md`.
+- El Lote 4 (Feedback, denoise, pitch/vocal isolation: revisión de estabilidad)
+  está pendiente. Al abrirlo, cargar este documento y la metodología de arriba,
+  recorrer los módulos con criterio de audio y cerrar con la batería de
+  verificación completa de `AGENTS.md`.
 - Después de cada fix, **releer el diff completo** buscando reintroducciones de
   estos patrones (identidades, dobles procesados, detectores sin release, clamps
   olvidados).

@@ -46,6 +46,7 @@ fn tone_delta(tone: f32) -> f32 {
 /// hilo de audio solo se aplica la ecuación en diferencias.
 pub struct Sculpt {
     params: SculptParams,
+    sample_rate: u32,
     bass: BiquadFilter,
     presence: BiquadFilter,
     air: BiquadFilter,
@@ -57,6 +58,7 @@ impl Sculpt {
         let t = tone_delta(params.tone);
         Self {
             params,
+            sample_rate,
             bass: BiquadFilter::design(
                 BiquadParams {
                     kind: BiquadKind::LowShelf,
@@ -89,7 +91,7 @@ impl Sculpt {
 
     /// Actualiza los parámetros en vivo (desde el hilo de control).
     pub fn update_params(&mut self, params: SculptParams) {
-        self.params = params;
+        *self = Self::from_params(params, self.sample_rate);
     }
 }
 
@@ -156,6 +158,45 @@ mod tests {
         for (a, b) in input.iter().zip(out.iter()) {
             assert!((a - b).abs() < 1e-4, "tone 0.5 no es identidad");
         }
+    }
+
+    #[test]
+    fn update_params_rebuilds_filters() {
+        // update_params debe rediseñar los biquads: pasar de tono neutral (0.5,
+        // filtros identidad) a un tono brillante (0.9) debe filtrar la señal.
+        // Con el bug (guardar solo params) los filtros seguían construidos con
+        // el tono anterior → salida idéntica a la entrada.
+        let mut s = Sculpt::from_params(
+            SculptParams {
+                tone: 0.5,
+                mix: 1.0,
+            },
+            48_000,
+        );
+        let input: Vec<f32> = (0..256).map(|i| (i as f32 * 0.13).sin() * 0.5).collect();
+        let mut out = vec![0.0; 256];
+        s.process(&input, &mut out, &info(256));
+        assert!(
+            input
+                .iter()
+                .zip(out.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-4),
+            "control inválido: tone 0.5 no es identidad"
+        );
+
+        s.update_params(SculptParams {
+            tone: 0.9,
+            mix: 1.0,
+        });
+        let mut filtered = vec![0.0; 256];
+        s.process(&input, &mut filtered, &info(256));
+        assert!(
+            input
+                .iter()
+                .zip(filtered.iter())
+                .any(|(a, b)| (a - b).abs() > 1e-4),
+            "update_params no rediseñó los filtros: tone 0.9 no filtra"
+        );
     }
 
     #[test]
