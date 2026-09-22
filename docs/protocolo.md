@@ -190,6 +190,10 @@ mensajes JSON por el WebSocket para el móvil.
   `set_compressor`.
 - `deEsserParams`: solo lo lleva el módulo `deesser`; incluye `thresholdDb`,
   `freqHz` y `amount` (0–1). Se ajusta con `set_de_esser`.
+- `sculptParams`: solo lo lleva el módulo `sculpt`; incluye `tone` (0 oscuro –
+  1 brillante, 0.5 neutro) y `mix` (0–1). Se ajusta con `set_sculpt`.
+- `vocalIsolationParams`: solo lo lleva el módulo `vocal_isolation`; incluye
+  `strength` (0–1) y `mix` (0–1). Se ajusta con `set_vocal_isolation`.
 - `latencyMs` (ver evento `status`) ya **incluye** la latencia propia de la
   cadena (p. ej. el limiter suma su lookahead).
 
@@ -334,15 +338,17 @@ campos en camelCase:
 | `set_harmonizer` | `{ params: HarmonizerParams }` | `DspState` |
 | `set_compressor` | `{ params: CompressorParams }` | `DspState` |
 | `set_de_esser` | `{ params: DeEsserParams }` | `DspState` |
+| `set_sculpt` | `{ params: SculptParams }` | `DspState` |
+| `set_vocal_isolation` | `{ params: VocalIsolationParams }` | `DspState` |
 | `get_analysis` | — | `AnalysisSample \| null` |
 | `get_session_summary` | — | `SessionSummary \| null` |
 | `apply_suggestion` | `{ suggestionId: number }` | — |
 | `get_pairing_info` | — | `{ code, port, lanAddress }` |
 
 - `bufferSize` en `start_engine` es opcional (`null` → heurística automática).
-- Los nombres de módulo de la cadena incluyen: `gain`, `highpass`, `noisegate`,
-  `notch`, `boomsuppressor`, `eq`, `compressor`, `deesser`, `saturator`,
-  `dynamic_eq`, `harmonizer`, `delay`, `reverb`, `limiter`, `denoise`,
+- Los nombres de módulo de la cadena incluyen: `gain`, `highpass`, `vocal_isolation`,
+  `noisegate`, `notch`, `boomsuppressor`, `eq`, `sculpt`, `compressor`, `deesser`,
+  `saturator`, `dynamic_eq`, `harmonizer`, `delay`, `reverb`, `limiter`, `denoise`,
   `feedbacksuppress`, `pitchcorrection`.
 
 ## Configuración persistida (solo escritorio)
@@ -418,13 +424,14 @@ móvil: solo lo consume la cabina para precargar los selectores.
   sistema).
 - Al arrancar el motor con un dispositivo con perfil, se aplican su preset,
   sus `eqBands`, sus `gateParams`, sus `delayParams`, sus `reverbParams`,
-  sus `saturatorParams`, sus `dynamicEqParams`, sus `harmonizerParams` y sus
-  bypasses.
+  sus `saturatorParams`, sus `dynamicEqParams`, sus `harmonizerParams`, sus
+  `sculptParams`, sus `vocalIsolationParams` y sus bypasses.
   `apply_preset`/`set_*_bypass` persisten al instante; el ajuste fino del EQ
   (`set_eq_band`), de la puerta de ruido (`set_noise_gate`), del delay
   (`set_delay`), del reverb (`set_reverb`), del saturador (`set_saturator`),
-  del dynamic eq (`set_dynamic_eq`) y del harmonizer (`set_harmonizer`) se
-  vuelcan al detener el motor.
+  del dynamic eq (`set_dynamic_eq`), del harmonizer (`set_harmonizer`),
+  de Sculpt (`set_sculpt`) y del aislamiento de voz (`set_vocal_isolation`)
+  se vuelcan al detener el motor.
 - Archivo tolerante a fallos: si falta o está corrupto se parte de la
   configuración vacía.
 
@@ -465,8 +472,9 @@ Los argumentos en JS usan camelCase (Tauri v2 los convierte desde snake_case).
   - **Server → client**: eventos del motor (`status`, `level`, `dsp`, …).
   - **Client → server**: comandos `stop`, `setPreset`, `setGlobalBypass`,
     `setLinkBypass`, `setEqBand`, `setNoiseGate`, `setDelay`, `setReverb`,
-    `setSaturator`, `setDynamicEq`, `setHarmonizer`, `setCompressor` y
-    `setDeEsser` (JSON con `tag = "type"`). `start` se rechaza.
+    `setSaturator`, `setDynamicEq`, `setHarmonizer`, `setCompressor`,
+    `setDeEsser`, `setSculpt` y `setVocalIsolation` (JSON con `tag = "type"`).
+    `start` se rechaza.
 - Comandos malformados o fallidos se responden con un evento `warning` dirigido
   al cliente que los envió.
 - Límites de entrada (seguridad): mensajes ≤ 1 KB; ganancia del EQ acotada a

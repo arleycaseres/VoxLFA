@@ -32,7 +32,10 @@ const SR: f32 = 48000.0;
 // ── Detección de pitch (YIN) ──
 
 /// Detector de frecuencia fundamental con algoritmo YIN.
-struct PitchDetector {
+///
+/// Lo reutiliza `vocal_isolation` para guiar su comb armónico, por eso es
+/// `pub(crate)` (módulo interno del crate).
+pub(crate) struct PitchDetector {
     /// Buffer circular de entrada.
     buffer: Vec<f32>,
     /// Posición de escritura en el buffer circular.
@@ -46,7 +49,7 @@ struct PitchDetector {
 }
 
 impl PitchDetector {
-    fn new(frame_size: usize) -> Self {
+    pub(crate) fn new(frame_size: usize) -> Self {
         Self {
             buffer: vec![0.0; frame_size],
             pos: 0,
@@ -58,7 +61,7 @@ impl PitchDetector {
 
     /// Acumula muestras en el buffer circular y, cuando hay un frame completo,
     /// estima F0. Devuelve `Some(f0)` o `None` si el buffer no está lleno.
-    fn feed_and_detect(&mut self, samples: &[f32]) -> Option<f32> {
+    pub(crate) fn feed_and_detect(&mut self, samples: &[f32]) -> Option<f32> {
         for &s in samples {
             self.buffer[self.pos] = s;
             self.pos = (self.pos + 1) % self.frame_size;

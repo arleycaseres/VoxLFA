@@ -125,6 +125,10 @@ impl PresetFactory {
 fn voce_limpia() -> Vec<DspModuleSpec> {
     vec![
         module(DspModuleKind::HighPass { cutoff_hz: 80.0 }),
+        module(DspModuleKind::VocalIsolation {
+            strength: 0.45,
+            mix: 0.35,
+        }),
         module(DspModuleKind::Denoise { mix: 1.0 }),
         module(DspModuleKind::FeedbackSuppressor {
             mode: FeedbackMode::Adaptive,
@@ -313,6 +317,10 @@ fn warm() -> Vec<DspModuleSpec> {
                 band(EqBandKind::HighShelf, 7000.0, -2.0, 0.8),
             ],
         }),
+        module(DspModuleKind::Sculpt {
+            tone: 0.5,
+            mix: 0.4,
+        }),
         module(DspModuleKind::Compressor {
             threshold_db: -28.0,
             ratio: 2.5,
@@ -456,6 +464,10 @@ fn foh() -> Vec<DspModuleSpec> {
             mode: SaturatorMode::Tube,
             drive: 1.5,
             mix: 0.2,
+        }),
+        module(DspModuleKind::Sculpt {
+            tone: 0.5,
+            mix: 0.4,
         }),
         module(DspModuleKind::Harmonizer {
             intervals: vec![-12, 0, 12],

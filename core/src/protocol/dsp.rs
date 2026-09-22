@@ -206,6 +206,34 @@ pub struct SaturatorParams {
     pub mix: f32,
 }
 
+/// Parámetros de Sculpt (espejo de `DspModuleKind::Sculpt`).
+///
+/// Control tonal único: `tone` varía de "oscuro" (`0.0`) a "brillante" (`1.0`),
+/// con `0.5` como neutro (ganancias nulas). Se implementa con tres biquads
+/// (low-shelf 250 Hz, peaking 3 kHz, high-shelf 8.5 kHz).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SculptParams {
+    /// Carácter tonal (0 = oscuro, 1 = brillante, 0.5 = neutro).
+    pub tone: f32,
+    /// Mezcla seco/húmedo (0 = seco, 1 = forma aplicada completa).
+    pub mix: f32,
+}
+
+/// Parámetros de aislamiento de voz (espejo de `DspModuleKind::VocalIsolation`).
+///
+/// Comb armónico guiado por detección de tono (YIN): refuerza la periodicidad
+/// de la voz trasladada su periodo exacto, separándola del acompañamiento sin
+/// añadir latencia.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VocalIsolationParams {
+    /// Intensidad del aislamiento (0 = sin efecto, 1 = máximo).
+    pub strength: f32,
+    /// Mezcla seco/húmedo (0 = seco, 1 = aislada completa).
+    pub mix: f32,
+}
+
 /// Parámetros de una banda del EQ dinámico.
 ///
 /// Cada banda comprime o expande una región de frecuencia de forma independiente
@@ -602,6 +630,20 @@ pub enum DspModuleKind {
         /// Número de copias por voz (1–4, mayor = más cuerpo pero más CPU).
         voices_per_interval: u32,
     },
+    /// Sculpt: modelado tonal de la voz con un solo control.
+    Sculpt {
+        /// Carácter tonal (0 = oscuro, 1 = brillante, 0.5 = neutro).
+        tone: f32,
+        /// Mezcla seco/húmedo (0 = seco, 1 = forma aplicada completa).
+        mix: f32,
+    },
+    /// Aislamiento de voz en tiempo real (comb armónico guiado por YIN).
+    VocalIsolation {
+        /// Intensidad del aislamiento (0 = sin efecto, 1 = máximo).
+        strength: f32,
+        /// Mezcla seco/húmedo (0 = seco, 1 = aislada completa).
+        mix: f32,
+    },
 }
 
 /// Especificación de un módulo dentro de la cadena.
@@ -661,6 +703,13 @@ pub struct DspLinkState {
     /// Parámetros actuales del de-esser si este módulo es deesser;
     /// `None` en los demás. Refleja los ajustes en vivo con `set_de_esser`.
     pub de_esser_params: Option<DeEsserParams>,
+    /// Parámetros actuales de Sculpt si este módulo es sculpt; `None` en los
+    /// demás. Refleja los ajustes en vivo con `set_sculpt`.
+    pub sculpt_params: Option<SculptParams>,
+    /// Parámetros actuales de aislamiento de voz si este módulo es
+    /// vocal_isolation; `None` en los demás. Refleja los ajustes en vivo con
+    /// `set_vocal_isolation`.
+    pub vocal_isolation_params: Option<VocalIsolationParams>,
 }
 
 /// Estado completo de la cadena DSP activa.

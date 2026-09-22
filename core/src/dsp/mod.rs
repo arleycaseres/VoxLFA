@@ -33,6 +33,8 @@ pub mod presets;
 pub mod processor;
 pub mod reverb;
 pub mod saturator;
+pub mod sculpt;
+pub mod vocal_isolation;
 
 pub use biquad::{BiquadFilter, BiquadKind, BiquadParams};
 pub use boomsuppressor::BoomSuppressor;
@@ -60,6 +62,8 @@ pub use presets::PresetFactory;
 pub use processor::{AudioProcessor, ProcessResult, ProcessingInfo};
 pub use reverb::Reverb;
 pub use saturator::Saturator;
+pub use sculpt::Sculpt;
+pub use vocal_isolation::VocalIsolation;
 
 /// Tamaño máximo de bloque que el hilo de denoise procesa por iteración.
 ///

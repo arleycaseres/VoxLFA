@@ -15,7 +15,10 @@ a nivel de concierto (multi-modo, pre-delay, ducking, filtros). Las **Fase 10**
 y **11** añaden saturación multi-modo (Tube/Tape/TubeTape), dynamic EQ
 (compresión por banda), supresión de feedback adaptativa FIR (NLMS), harmonizer
 vocal (delay-lines con crossfade), presets Monitor/FOH, y enrutamiento
-send/Return para efectos de tiempo en paralelo.
+send/Return para efectos de tiempo en paralelo. La **Fase 12** añade **Sculpt**
+(modelado tonal con un solo control de brillo, tres biquads) y el
+**aislamiento de voz en tiempo real** (filtro comb guiado por detección de
+fundamental YIN), ambos ajustables en vivo y espejados en el móvil.
 
 ## Principios
 
@@ -180,7 +183,8 @@ Cáscara de escritorio que orquesta el core:
 - `src-tauri/src/tauri_app.rs` (feature `webview`): comandos expuestos a la UI,
   incluidos `apply_preset`, `set_global_bypass`, `set_link_bypass`,
   `set_eq_band`, `set_noise_gate`, `set_delay`, `set_reverb`, `set_saturator`,
-  `set_dynamic_eq`, `set_harmonizer`, `set_compressor` y `set_de_esser`,
+  `set_dynamic_eq`, `set_harmonizer`, `set_compressor`, `set_de_esser`,
+  `set_sculpt` y `set_vocal_isolation`,
   que reconfiguran la cadena DSP en vivo vía `EngineManager`, y los de
   análisis: `get_analysis`, `get_session_summary` y `apply_suggestion`.
 
@@ -239,16 +243,16 @@ La cadena no se toca desde el hilo de audio:
 
 1. La UI llama `apply_preset`/`set_*_bypass`/`set_eq_band`/`set_noise_gate`/
    `set_delay`/`set_reverb`/`set_saturator`/`set_dynamic_eq`/`set_harmonizer`/
-   `set_compressor`/`set_de_esser`
+   `set_compressor`/`set_de_esser`/`set_sculpt`/`set_vocal_isolation`
    → `DspCommand` por canal mpsc.
 2. El hilo de control de `DspHandle` construye la cadena (o el módulo) nueva
    —aquí sí se puede asignar memoria— y la intercambia atómicamente con la
    activa. Para el ajuste fino solo se reemplaza el procesador del eslabón
    (`SetLinkProcessor`/`SetLinkGate`), sin reconstruir delay/reverb ni perder
-   su estado. Para delay/reverb/saturador/dynamic_eq/harmonizer/compressor/de-esser se reconstruye
+   su estado. Para delay/reverb/saturador/dynamic_eq/harmonizer/compressor/de-esser/sculpt/vocal_isolation se reconstruye
    el procesador completo (`SetLinkDelay`/`SetLinkReverb`/
    `SetLinkSaturator`/`SetLinkDynamicEq`/`SetLinkHarmonizer`/
-   `SetLinkCompressor`/`SetLinkDeEsser`).
+   `SetLinkCompressor`/`SetLinkDeEsser`/`SetLinkSculpt`/`SetLinkVocalIsolation`).
 3. El callback de audio solo ve el puntero nuevo en la siguiente iteración;
    actualiza `Arc<Mutex<DspState>>` y emite `EngineEvent::Dsp`.
 

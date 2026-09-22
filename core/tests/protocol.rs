@@ -272,6 +272,8 @@ fn engine_event_dsp_serializes_with_type_tag() {
             harmonizer_params: None,
             compressor_params: None,
             de_esser_params: None,
+            sculpt_params: None,
+            vocal_isolation_params: None,
         }],
     });
 

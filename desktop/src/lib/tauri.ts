@@ -30,9 +30,11 @@ import type {
   PresetInfo,
   ReverbParams,
   SaturatorParams,
+  SculptParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
+  VocalIsolationParams,
 } from "./types";
 
 /** `true` dentro de la ventana real de Tauri; `false` en un navegador plano. */
@@ -222,6 +224,18 @@ export function setCompressor(params: CompressorParams): Promise<void> {
 /** Ajusta los parámetros del de-esser en vivo. */
 export function setDeEsser(params: DeEsserParams): Promise<void> {
   return inTauri() ? invoke<void>("set_de_esser", { params }) : mock.setDeEsser(params);
+}
+
+/** Ajusta los parámetros de Sculpt en vivo. */
+export function setSculpt(params: SculptParams): Promise<void> {
+  return inTauri() ? invoke<void>("set_sculpt", { params }) : mock.setSculpt(params);
+}
+
+/** Ajusta los parámetros de aislamiento de voz en vivo. */
+export function setVocalIsolation(params: VocalIsolationParams): Promise<void> {
+  return inTauri()
+    ? invoke<void>("set_vocal_isolation", { params })
+    : mock.setVocalIsolation(params);
 }
 
 /** Lee la última muestra de análisis vocal (o `null` si no hay datos). */

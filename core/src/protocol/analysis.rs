@@ -127,6 +127,20 @@ pub enum SuggestionAction {
         /// Mezcla seco/húmedo (0–1).
         mix: f32,
     },
+    /// Ajustar el carácter tonal de Sculpt.
+    SetSculpt {
+        /// Carácter tonal (0 = oscuro, 1 = brillante, 0.5 = neutro).
+        tone: f32,
+        /// Mezcla seco/húmedo (0–1).
+        mix: f32,
+    },
+    /// Ajustar la intensidad del aislamiento de voz.
+    SetVocalIsolation {
+        /// Intensidad del aislamiento (0–1).
+        strength: f32,
+        /// Mezcla seco/húmedo (0–1).
+        mix: f32,
+    },
 }
 
 /// Sugerencia generada por el motor de análisis para la voz actual.

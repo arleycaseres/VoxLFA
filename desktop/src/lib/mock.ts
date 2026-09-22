@@ -31,11 +31,13 @@ import type {
   PresetInfo,
   ReverbParams,
   SaturatorParams,
+  SculptParams,
   DynamicEqParams,
   SessionSummary,
   SpectrumSample,
   Suggestion,
   VoiceMetrics,
+  VocalIsolationParams,
 } from "./types";
 import type { PairingInfo } from "./tauri";
 
@@ -97,11 +99,11 @@ const FAKE_PRESETS: PresetInfo[] = [
 /** Nombres de módulo por preset (espejo de `PresetFactory::specs`). */
 const PRESET_LINKS: Record<PresetId, string[]> = {
   dry: [],
-  vozLimpia: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "dynamic_eq", "deesser", "compressor", "harmonizer", "limiter"],
+  vozLimpia: ["highpass", "vocal_isolation", "denoise", "noisegate", "boomsuppressor", "eq", "dynamic_eq", "deesser", "compressor", "harmonizer", "limiter"],
   radio: ["highpass", "denoise", "noisegate", "notch", "eq", "saturator", "compressor", "limiter"],
-  warm: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "compressor", "harmonizer", "reverb", "limiter"],
+  warm: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "sculpt", "compressor", "harmonizer", "reverb", "limiter"],
   monitor: ["highpass", "denoise", "noisegate", "eq", "compressor", "limiter"],
-  foh: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "dynamic_eq", "deesser", "compressor", "saturator", "harmonizer", "limiter"],
+  foh: ["highpass", "denoise", "noisegate", "boomsuppressor", "eq", "dynamic_eq", "deesser", "compressor", "saturator", "sculpt", "harmonizer", "limiter"],
 };
 
 /** Parámetros de la puerta de ruido por preset (espejo del core). */
@@ -248,6 +250,26 @@ const PRESET_FEEDBACK: Record<PresetId, FeedbackSuppressorParams | null> = {
   foh: { mode: "adaptive", thresholdDb: -30.0, q: 10.0, mu: 0.15, filterLen: 256 },
 };
 
+/** Parámetros de Sculpt por preset (espejo del core). */
+const PRESET_SCULPT: Record<PresetId, SculptParams | null> = {
+  dry: null,
+  vozLimpia: null,
+  radio: null,
+  warm: { tone: 0.5, mix: 0.4 },
+  monitor: null,
+  foh: { tone: 0.5, mix: 0.4 },
+};
+
+/** Parámetros de aislamiento de voz por preset (espejo del core). */
+const PRESET_VOCAL_ISOLATION: Record<PresetId, VocalIsolationParams | null> = {
+  dry: null,
+  vozLimpia: { strength: 0.45, mix: 0.35 },
+  radio: null,
+  warm: null,
+  monitor: null,
+  foh: null,
+};
+
 function buildDspState(preset: PresetId): DspState {
   const links: DspLinkState[] = PRESET_LINKS[preset].map((name) => ({
     name,
@@ -265,6 +287,9 @@ function buildDspState(preset: PresetId): DspState {
     harmonizerParams: null,
     compressorParams: null,
     deEsserParams: null,
+    sculptParams: name === "sculpt" ? PRESET_SCULPT[preset] : null,
+    vocalIsolationParams:
+      name === "vocal_isolation" ? PRESET_VOCAL_ISOLATION[preset] : null,
   }));
   return { preset, globalBypass: false, links };
 }
@@ -786,6 +811,30 @@ export function setDeEsser(params: DeEsserParams): Promise<void> {
     links: dspState.links.map((item) =>
       item.name === "deesser"
         ? { ...item, deEsserParams: params }
+        : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setSculpt(params: SculptParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "sculpt" ? { ...item, sculptParams: params } : item,
+    ),
+  };
+  syncDsp();
+  return Promise.resolve();
+}
+
+export function setVocalIsolation(params: VocalIsolationParams): Promise<void> {
+  dspState = {
+    ...dspState,
+    links: dspState.links.map((item) =>
+      item.name === "vocal_isolation"
+        ? { ...item, vocalIsolationParams: params }
         : item,
     ),
   };

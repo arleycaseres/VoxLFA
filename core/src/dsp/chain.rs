@@ -15,14 +15,14 @@ use crate::dsp::RnnoiseDenoise;
 use crate::dsp::{
     AudioProcessor, BoomSuppressor, Compressor, DeEsser, DynamicEq, FeedbackSuppressor, Gain,
     Harmonizer, HighPass, Limiter, NoiseGate, Notch, ParametricEq, ProcessResult, ProcessingInfo,
-    Saturator,
+    Saturator, Sculpt, VocalIsolation,
 };
 use crate::error::Error;
 use crate::protocol::{
     CompressorParams, DeEsserParams, DelayParams, DenoiseParams, DspLinkState, DspModuleKind,
     DspModuleSpec, DspState, DynamicEqParams, EngineEvent, EqBand, FeedbackSuppressorParams,
     HarmonizerParams, NoiseGateParams, PitchCorrectionParams, PresetId, ReverbParams,
-    SaturatorParams,
+    SaturatorParams, SculptParams, VocalIsolationParams,
 };
 use crate::Result;
 
@@ -115,6 +115,11 @@ struct ChainLink {
     compressor_params: Option<CompressorParams>,
     /// Parámetros actuales de de-esser si este eslabón es deesser; `None` si no.
     de_esser_params: Option<DeEsserParams>,
+    /// Parámetros actuales de Sculpt si este eslabón es sculpt; `None` si no.
+    sculpt_params: Option<SculptParams>,
+    /// Parámetros actuales de aislamiento de voz si este eslabón es
+    /// vocal_isolation; `None` si no.
+    vocal_isolation_params: Option<VocalIsolationParams>,
 }
 
 /// Cadena de procesamiento en serie, construida a partir de un preset.
@@ -187,6 +192,8 @@ impl ChainProcessor {
                 let harmonizer_params = harmonizer_params_of(&spec.kind);
                 let compressor_params = compressor_params_of(&spec.kind);
                 let de_esser_params = de_esser_params_of(&spec.kind);
+                let sculpt_params = sculpt_params_of(&spec.kind);
+                let vocal_isolation_params = vocal_isolation_params_of(&spec.kind);
                 ChainLink {
                     name: module_name(&spec.kind),
                     enabled: spec.enabled,
@@ -204,6 +211,8 @@ impl ChainProcessor {
                     harmonizer_params,
                     compressor_params,
                     de_esser_params,
+                    sculpt_params,
+                    vocal_isolation_params,
                 }
             })
             .collect();
@@ -456,6 +465,43 @@ impl ChainProcessor {
         }
     }
 
+    /// Reemplaza el procesador de Sculpt de un eslabón (ajuste en vivo).
+    pub fn set_link_sculpt(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: SculptParams,
+    ) -> bool {
+        match self.links.iter_mut().find(|link| link.name == "sculpt") {
+            Some(link) => {
+                link.processor = processor;
+                link.sculpt_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Reemplaza el procesador de aislamiento de voz de un eslabón (ajuste en
+    /// vivo).
+    pub fn set_link_vocal_isolation(
+        &mut self,
+        processor: Box<dyn AudioProcessor>,
+        params: VocalIsolationParams,
+    ) -> bool {
+        match self
+            .links
+            .iter_mut()
+            .find(|link| link.name == "vocal_isolation")
+        {
+            Some(link) => {
+                link.processor = processor;
+                link.vocal_isolation_params = Some(params);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Estado declarativo de la cadena para la UI (protocolo).
     pub fn state(&self) -> DspState {
         DspState {
@@ -480,6 +526,8 @@ impl ChainProcessor {
                     harmonizer_params: link.harmonizer_params.clone(),
                     compressor_params: link.compressor_params,
                     de_esser_params: link.de_esser_params,
+                    sculpt_params: link.sculpt_params,
+                    vocal_isolation_params: link.vocal_isolation_params,
                 })
                 .collect(),
         }
@@ -862,6 +910,20 @@ pub enum DspCommand {
         /// Parámetros actuales de de-esser para el estado de la cadena.
         params: DeEsserParams,
     },
+    /// Reemplazar el procesador de Sculpt (ajuste en vivo).
+    SetLinkSculpt {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de Sculpt para el estado de la cadena.
+        params: SculptParams,
+    },
+    /// Reemplazar el procesador de aislamiento de voz (ajuste en vivo).
+    SetLinkVocalIsolation {
+        /// Procesador nuevo, construido en el hilo de control.
+        processor: Box<dyn AudioProcessor>,
+        /// Parámetros actuales de aislamiento de voz para el estado de la cadena.
+        params: VocalIsolationParams,
+    },
 }
 
 /// Mango de control de la cadena DSP (hilo de UI/control).
@@ -911,6 +973,8 @@ impl DspHandle {
                     harmonizer_params: harmonizer_params_of(&spec.kind),
                     compressor_params: compressor_params_of(&spec.kind),
                     de_esser_params: de_esser_params_of(&spec.kind),
+                    sculpt_params: sculpt_params_of(&spec.kind),
+                    vocal_isolation_params: vocal_isolation_params_of(&spec.kind),
                 })
                 .collect(),
         }));
@@ -1280,6 +1344,44 @@ impl DspHandle {
         Ok(())
     }
 
+    /// Ajusta los parámetros de Sculpt en vivo.
+    pub fn set_sculpt(&self, params: SculptParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "sculpt")
+            .ok_or_else(|| Error::audio("el preset actual no tiene el módulo Sculpt"))?;
+        link.sculpt_params = Some(params);
+
+        let processor = Sculpt::from_params(params, self.sample_rate);
+        self.send(DspCommand::SetLinkSculpt {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
+    /// Ajusta los parámetros de aislamiento de voz en vivo.
+    pub fn set_vocal_isolation(&self, params: VocalIsolationParams) -> Result<()> {
+        let mut state = self.get_state()?;
+        let link = state
+            .links
+            .iter_mut()
+            .find(|link| link.name == "vocal_isolation")
+            .ok_or_else(|| Error::audio("el preset actual no tiene aislamiento de voz"))?;
+        link.vocal_isolation_params = Some(params);
+
+        let processor = VocalIsolation::from_params(params, self.sample_rate);
+        self.send(DspCommand::SetLinkVocalIsolation {
+            processor: Box::new(processor),
+            params,
+        })?;
+        self.publish(state);
+        Ok(())
+    }
+
     /// Último estado de la cadena (espejo del hilo de control).
     pub fn get_state(&self) -> Result<DspState> {
         self.state
@@ -1324,6 +1426,8 @@ fn module_name(kind: &DspModuleKind) -> &'static str {
         DspModuleKind::FeedbackSuppressor { .. } => "feedback",
         DspModuleKind::PitchCorrection { .. } => "pitch_correction",
         DspModuleKind::Harmonizer { .. } => "harmonizer",
+        DspModuleKind::Sculpt { .. } => "sculpt",
+        DspModuleKind::VocalIsolation { .. } => "vocal_isolation",
     }
 }
 
@@ -1489,6 +1593,26 @@ fn harmonizer_params_of(kind: &DspModuleKind) -> Option<HarmonizerParams> {
             intervals: intervals.clone(),
             mix: *mix,
             voices_per_interval: *voices_per_interval,
+        }),
+        _ => None,
+    }
+}
+
+fn sculpt_params_of(kind: &DspModuleKind) -> Option<SculptParams> {
+    match kind {
+        DspModuleKind::Sculpt { tone, mix } => Some(SculptParams {
+            tone: *tone,
+            mix: *mix,
+        }),
+        _ => None,
+    }
+}
+
+fn vocal_isolation_params_of(kind: &DspModuleKind) -> Option<VocalIsolationParams> {
+    match kind {
+        DspModuleKind::VocalIsolation { strength, mix } => Some(VocalIsolationParams {
+            strength: *strength,
+            mix: *mix,
         }),
         _ => None,
     }
@@ -1737,6 +1861,16 @@ fn build_processor(
                 voices_per_interval,
             };
             Box::new(Harmonizer::from_params(&params, sample_rate))
+        }
+        DspModuleKind::Sculpt { tone, mix } => {
+            let _ = max_frames;
+            let params = SculptParams { tone, mix };
+            Box::new(Sculpt::from_params(params, sample_rate))
+        }
+        DspModuleKind::VocalIsolation { strength, mix } => {
+            let _ = max_frames;
+            let params = VocalIsolationParams { strength, mix };
+            Box::new(VocalIsolation::from_params(params, sample_rate))
         }
     }
 }

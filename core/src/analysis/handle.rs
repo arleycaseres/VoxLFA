@@ -11,8 +11,8 @@ use crate::dsp::DspHandle;
 use crate::error::Error;
 use crate::protocol::{
     AnalysisSample, DelayParams, DenoiseParams, DynamicEqParams, FeedbackSuppressorParams,
-    HarmonizerParams, PitchCorrectionParams, ReverbParams, SaturatorParams, SessionSummary,
-    SuggestionAction,
+    HarmonizerParams, PitchCorrectionParams, ReverbParams, SaturatorParams, SculptParams,
+    SessionSummary, SuggestionAction, VocalIsolationParams,
 };
 use crate::Result;
 
@@ -167,6 +167,16 @@ impl AnalysisHandle {
                     intervals: current.intervals,
                     mix: *mix,
                     voices_per_interval: current.voices_per_interval,
+                })
+            }
+            SuggestionAction::SetSculpt { tone, mix } => self.dsp.set_sculpt(SculptParams {
+                tone: *tone,
+                mix: *mix,
+            }),
+            SuggestionAction::SetVocalIsolation { strength, mix } => {
+                self.dsp.set_vocal_isolation(VocalIsolationParams {
+                    strength: *strength,
+                    mix: *mix,
                 })
             }
         }

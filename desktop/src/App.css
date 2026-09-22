@@ -1915,6 +1915,230 @@
   text-align: right;
 }
 
+/* ---------- Panel de Sculpt ---------- */
+.sculptpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.sculptpanel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.sculptpanel__title {
+  font-family: var(--font-display);
+  font-size: 0.64rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+.sculptpanel__state {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+}
+
+.sculptpanel__state--on {
+  color: var(--color-cyan);
+  border-color: var(--color-cyan);
+}
+
+.sculptpanel__state--off {
+  color: var(--color-text-dim);
+  border-color: var(--color-border);
+}
+
+.sculptpanel__empty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--color-text-dim);
+}
+
+.sculptpanel__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.sculptpanel__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+}
+
+.sculptpanel__name {
+  color: var(--color-text);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-family: var(--font-display);
+}
+
+.sculptpanel__value {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  color: var(--color-cyan);
+}
+
+.sculptpanel__track {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sculptpanel__slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--color-cyan);
+}
+
+.sculptpanel__slider:disabled {
+  opacity: 0.4;
+}
+
+.sculptpanel__scale {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: var(--color-text-dim);
+  flex: 0 0 auto;
+}
+
+.sculptpanel__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.sculptpanel__hint {
+  font-size: 0.62rem;
+  color: var(--color-text-dim);
+  text-align: right;
+}
+
+/* ---------- Panel de aislamiento de voz ---------- */
+.vocalisolationpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.vocalisolationpanel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.vocalisolationpanel__title {
+  font-family: var(--font-display);
+  font-size: 0.64rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+.vocalisolationpanel__state {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+}
+
+.vocalisolationpanel__state--on {
+  color: var(--color-cyan);
+  border-color: var(--color-cyan);
+}
+
+.vocalisolationpanel__state--off {
+  color: var(--color-text-dim);
+  border-color: var(--color-border);
+}
+
+.vocalisolationpanel__empty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--color-text-dim);
+}
+
+.vocalisolationpanel__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.vocalisolationpanel__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+}
+
+.vocalisolationpanel__name {
+  color: var(--color-text);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-family: var(--font-display);
+}
+
+.vocalisolationpanel__value {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  color: var(--color-cyan);
+}
+
+.vocalisolationpanel__track {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vocalisolationpanel__slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--color-cyan);
+}
+
+.vocalisolationpanel__slider:disabled {
+  opacity: 0.4;
+}
+
+.vocalisolationpanel__scale {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: var(--color-text-dim);
+  flex: 0 0 auto;
+}
+
+.vocalisolationpanel__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.vocalisolationpanel__hint {
+  font-size: 0.62rem;
+  color: var(--color-text-dim);
+  text-align: right;
+}
+
 /* ---------- Panel de EQ dinámico ---------- */
 .dynamiceqpanel {
   display: flex;

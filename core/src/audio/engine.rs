@@ -483,6 +483,12 @@ impl AudioEngine {
                             DspCommand::SetLinkDeEsser { processor, params } => {
                                 chain.set_link_de_esser(processor, params);
                             }
+                            DspCommand::SetLinkSculpt { processor, params } => {
+                                chain.set_link_sculpt(processor, params);
+                            }
+                            DspCommand::SetLinkVocalIsolation { processor, params } => {
+                                chain.set_link_vocal_isolation(processor, params);
+                            }
                         }
                     }
 

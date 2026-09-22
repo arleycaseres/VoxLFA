@@ -284,6 +284,22 @@ export interface DeEsserParams {
   amount: number;
 }
 
+/** Parámetros de Sculpt (espejo de `core/src/protocol/dsp.rs`). */
+export interface SculptParams {
+  /** Tono (0 = oscuro, 0.5 = neutro, 1 = brillante). */
+  tone: number;
+  /** Mezcla seco/húmedo (0 = seco, 1 = esculpido completo). */
+  mix: number;
+}
+
+/** Parámetros de aislamiento de voz (espejo de `core/src/protocol/dsp.rs`). */
+export interface VocalIsolationParams {
+  /** Intensidad del aislamiento (0 = apagado, 1 = máximo). */
+  strength: number;
+  /** Mezcla seco/húmedo (0 = seco, 1 = aislado completo). */
+  mix: number;
+}
+
 /** Parámetros de una banda del EQ dinámico. */
 export interface DynamicEqBandParams {
   /** Frecuencia central de la banda (Hz). */
@@ -350,6 +366,10 @@ export interface DspLinkState {
   compressorParams: CompressorParams | null;
   /** Parámetros del de-esser si este módulo es deesser; si no, `null`. */
   deEsserParams: DeEsserParams | null;
+  /** Parámetros de Sculpt si este módulo es sculpt; si no, `null`. */
+  sculptParams: SculptParams | null;
+  /** Parámetros de aislamiento si este módulo es vocal_isolation; si no, `null`. */
+  vocalIsolationParams: VocalIsolationParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -415,6 +435,10 @@ export interface DeviceProfile {
   dynamicEqParams?: DynamicEqParams | null;
   /** Parámetros de harmonizer si se ajustaron en vivo. */
   harmonizerParams?: HarmonizerParams | null;
+  /** Parámetros de Sculpt si se ajustaron en vivo. */
+  sculptParams?: SculptParams | null;
+  /** Parámetros de aislamiento de voz si se ajustaron en vivo. */
+  vocalIsolationParams?: VocalIsolationParams | null;
   /** `true` si el bypass global estaba activo al guardar. */
   globalBypass: boolean;
   /** Bypass por módulo que estaba activo al guardar. */
@@ -477,7 +501,9 @@ export type SuggestionAction =
   | { type: "setDelay"; timeMs: number; mix: number }
   | { type: "setReverb"; wet: number; roomSize: number }
   | { type: "setSaturator"; drive: number; mix: number }
-  | { type: "setDynamicEq"; bandIndex: number; makeupDb: number };
+  | { type: "setDynamicEq"; bandIndex: number; makeupDb: number }
+  | { type: "setSculpt"; tone: number; mix: number }
+  | { type: "setVocalIsolation"; strength: number; mix: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {

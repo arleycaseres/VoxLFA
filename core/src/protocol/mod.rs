@@ -25,7 +25,7 @@ pub use dsp::{
     DspModuleKind, DspModuleSpec, DspState, DynamicEqBandParams, DynamicEqParams, EqBand,
     EqBandKind, FeedbackMode, FeedbackSuppressorParams, HarmonizerParams, MusicalNote,
     MusicalScale, NoiseGateParams, PitchCorrectionParams, PresetId, PresetInfo, ReverbMode,
-    ReverbParams, SaturatorMode, SaturatorParams,
+    ReverbParams, SaturatorMode, SaturatorParams, SculptParams, VocalIsolationParams,
 };
 pub use event::{
     AudioDeviceInfo, AudioHostInfo, EngineEvent, EngineState, EngineStatus, LevelSample,

@@ -294,6 +294,12 @@ fn execute_command(engine: &mut EngineManager, command: ControlCommand) -> Resul
         ControlCommand::SetHarmonizer { params } => {
             engine.set_harmonizer(params).map_err(|err| err.to_string())
         }
+        ControlCommand::SetSculpt { params } => {
+            engine.set_sculpt(params).map_err(|err| err.to_string())
+        }
+        ControlCommand::SetVocalIsolation { params } => engine
+            .set_vocal_isolation(params)
+            .map_err(|err| err.to_string()),
     }
 }
 

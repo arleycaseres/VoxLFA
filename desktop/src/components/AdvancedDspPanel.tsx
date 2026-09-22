@@ -19,6 +19,8 @@ import { DelayPanel } from "./DelayPanel";
 import { ReverbPanel } from "./ReverbPanel";
 import { SaturatorPanel } from "./SaturatorPanel";
 import { HarmonizerPanel } from "./HarmonizerPanel";
+import { SculptPanel } from "./SculptPanel";
+import { VocalIsolationPanel } from "./VocalIsolationPanel";
 
 type AccordionGroup = "basic" | "dynamics" | "effects" | "creative";
 
@@ -46,6 +48,8 @@ interface Props {
   onSetReverb: (params: Parameters<import("../hooks/useEngine").EngineController["setReverb"]>[0]) => void;
   onSetSaturator: (params: Parameters<import("../hooks/useEngine").EngineController["setSaturator"]>[0]) => void;
   onSetHarmonizer: (params: Parameters<import("../hooks/useEngine").EngineController["setHarmonizer"]>[0]) => void;
+  onSetSculpt: (params: Parameters<import("../hooks/useEngine").EngineController["setSculpt"]>[0]) => void;
+  onSetVocalIsolation: (params: Parameters<import("../hooks/useEngine").EngineController["setVocalIsolation"]>[0]) => void;
 }
 
 function AdvancedDspPanelInner({
@@ -65,6 +69,8 @@ function AdvancedDspPanelInner({
   onSetReverb,
   onSetSaturator,
   onSetHarmonizer,
+  onSetSculpt,
+  onSetVocalIsolation,
 }: Props) {
   return (
     <>
@@ -98,6 +104,10 @@ function AdvancedDspPanelInner({
                   <DenoisePanel dsp={dsp} running={running} onSetDenoise={onSetDenoise} />
                   <h3 className="panel__subtitle">Antifeedback</h3>
                   <FeedbackPanel dsp={dsp} running={running} onSetFeedback={onSetFeedback} />
+                  <h3 className="panel__subtitle">Aislamiento de voz</h3>
+                  <VocalIsolationPanel dsp={dsp} running={running} onSetVocalIsolation={onSetVocalIsolation} />
+                  <h3 className="panel__subtitle">Sculpt</h3>
+                  <SculptPanel dsp={dsp} running={running} onSetSculpt={onSetSculpt} />
                 </>
               )}
               {key === "dynamics" && (

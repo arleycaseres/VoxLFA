@@ -60,12 +60,14 @@ import type {
   PresetInfo,
   ReverbParams,
   SaturatorParams,
+  SculptParams,
   DynamicEqParams,
   HarmonizerParams,
   SessionSummary,
   SpectrumSample,
   StartEngineError,
   Suggestion,
+  VocalIsolationParams,
 } from "../lib/types";
 import {
   applyPreset,
@@ -98,9 +100,11 @@ import {
   setDelay,
   setReverb,
   setSaturator,
+  setSculpt,
   setDynamicEq,
   setHarmonizer,
   setTelemetryConsent,
+  setVocalIsolation,
   startEngine,
   stopEngine,
   type PairingInfo,
@@ -186,6 +190,10 @@ export interface EngineController {
   setCompressor: (params: CompressorParams) => Promise<void>;
   /** Ajusta los parámetros del de-esser del preset activo en vivo. */
   setDeEsser: (params: DeEsserParams) => Promise<void>;
+  /** Ajusta los parámetros de Sculpt del preset activo en vivo. */
+  setSculpt: (params: SculptParams) => Promise<void>;
+  /** Ajusta los parámetros de aislamiento de voz del preset activo en vivo. */
+  setVocalIsolation: (params: VocalIsolationParams) => Promise<void>;
   /** Aplica la acción de una sugerencia (con confirmación del usuario). */
   applySuggestion: (suggestionId: number) => Promise<void>;
   /** Refresca el resumen acumulado de la sesión (tras detener el motor). */
@@ -446,6 +454,25 @@ export function useEngine(): EngineController {
     }
   }, []);
 
+  const setSculptAction = useCallback(async (params: SculptParams) => {
+    try {
+      await setSculpt(params);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const setVocalIsolationAction = useCallback(
+    async (params: VocalIsolationParams) => {
+      try {
+        await setVocalIsolation(params);
+      } catch (err) {
+        setError(String(err));
+      }
+    },
+    [],
+  );
+
   const applySuggestionAction = useCallback(async (suggestionId: number) => {
     try {
       await applySuggestion(suggestionId);
@@ -631,6 +658,8 @@ export function useEngine(): EngineController {
     setHarmonizer: setHarmonizerAction,
     setCompressor: setCompressorAction,
     setDeEsser: setDeEsserAction,
+    setSculpt: setSculptAction,
+    setVocalIsolation: setVocalIsolationAction,
     applySuggestion: applySuggestionAction,
     refreshSessionSummary,
     setTelemetryConsent: setTelemetryConsentAction,

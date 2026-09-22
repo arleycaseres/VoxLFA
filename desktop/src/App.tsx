@@ -245,6 +245,16 @@ export default function App() {
       void engine.setDeEsser(params),
     [engine.setDeEsser],
   );
+  const handleSetSculpt = useCallback(
+    (params: Parameters<typeof engine.setSculpt>[0]) =>
+      void engine.setSculpt(params),
+    [engine.setSculpt],
+  );
+  const handleSetVocalIsolation = useCallback(
+    (params: Parameters<typeof engine.setVocalIsolation>[0]) =>
+      void engine.setVocalIsolation(params),
+    [engine.setVocalIsolation],
+  );
   const handleApplyPreset = useCallback(
     (id: string) => void engine.applyPreset(id as import("./lib/types").PresetId),
     [engine.applyPreset],
@@ -414,6 +424,8 @@ export default function App() {
               onSetReverb={handleSetReverb}
               onSetSaturator={handleSetSaturator}
               onSetHarmonizer={handleSetHarmonizer}
+              onSetSculpt={handleSetSculpt}
+              onSetVocalIsolation={handleSetVocalIsolation}
             />
           )}
 

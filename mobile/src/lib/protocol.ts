@@ -213,6 +213,22 @@ export interface DeEsserParams {
   amount: number;
 }
 
+/** Parámetros de Sculpt. */
+export interface SculptParams {
+  /** Tono (0 = oscuro, 0.5 = neutro, 1 = brillante). */
+  tone: number;
+  /** Mezcla seco/húmedo (0–1). */
+  mix: number;
+}
+
+/** Parámetros de aislamiento de voz. */
+export interface VocalIsolationParams {
+  /** Intensidad del aislamiento (0–1). */
+  strength: number;
+  /** Mezcla seco/húmedo (0–1). */
+  mix: number;
+}
+
 /** Estado de un módulo dentro de la cadena activa. */
 export interface DspLinkState {
   name: string;
@@ -242,6 +258,10 @@ export interface DspLinkState {
   compressorParams: CompressorParams | null;
   /** Parámetros del de-esser si este módulo es deesser; si no, `null`. */
   deEsserParams: DeEsserParams | null;
+  /** Parámetros de Sculpt si este módulo es sculpt; si no, `null`. */
+  sculptParams: SculptParams | null;
+  /** Parámetros de aislamiento de voz si este módulo es vocal_isolation; si no, `null`. */
+  vocalIsolationParams: VocalIsolationParams | null;
 }
 
 /** Estado completo de la cadena DSP activa. */
@@ -290,7 +310,9 @@ export type SuggestionAction =
   | { type: "setReverb"; wet: number; roomSize: number }
   | { type: "setSaturator"; drive: number; mix: number }
   | { type: "setDynamicEq"; bandIndex: number; makeupDb: number }
-  | { type: "setHarmonizer"; mix: number };
+  | { type: "setHarmonizer"; mix: number }
+  | { type: "setSculpt"; tone: number; mix: number }
+  | { type: "setVocalIsolation"; strength: number; mix: number };
 
 /** Sugerencia generada por el asistente para la voz actual. */
 export interface Suggestion {
@@ -344,7 +366,9 @@ export type ControlCommand =
   | { type: "setDynamicEq"; params: DynamicEqParams }
   | { type: "setHarmonizer"; params: HarmonizerParams }
   | { type: "setCompressor"; params: CompressorParams }
-  | { type: "setDeEsser"; params: DeEsserParams };
+  | { type: "setDeEsser"; params: DeEsserParams }
+  | { type: "setSculpt"; params: SculptParams }
+  | { type: "setVocalIsolation"; params: VocalIsolationParams };
 
 /**
  * Evento emitido por el motor por el WebSocket (tag `type`, campos camelCase).

@@ -310,7 +310,8 @@ impl EngineManager {
         analysis: AnalysisHandle,
     ) {
         // Reaplicar el ajuste fino del EQ, la puerta de ruido, el feedback
-        // suppressor, la corrección de tono y los bypasses persistidos.
+        // suppressor, la corrección de tono, Sculpt, el aislamiento de voz y
+        // los bypasses persistidos.
         if let Some(profile) = &pending.profile {
             if !profile.eq_bands.is_empty() {
                 let _ = dsp.set_eq_bands(profile.eq_bands.clone());
@@ -323,6 +324,12 @@ impl EngineManager {
             }
             if let Some(pitch) = profile.pitch_correction_params {
                 let _ = dsp.set_pitch_correction(pitch);
+            }
+            if let Some(sculpt) = profile.sculpt_params {
+                let _ = dsp.set_sculpt(sculpt);
+            }
+            if let Some(vocal) = profile.vocal_isolation_params {
+                let _ = dsp.set_vocal_isolation(vocal);
             }
             if profile.global_bypass {
                 let _ = dsp.set_global_bypass(true);
@@ -441,6 +448,16 @@ impl EngineManager {
                         .iter()
                         .find(|link| link.name == "pitch_correction")
                         .and_then(|link| link.pitch_correction_params);
+                    profile.sculpt_params = state
+                        .links
+                        .iter()
+                        .find(|link| link.name == "sculpt")
+                        .and_then(|link| link.sculpt_params);
+                    profile.vocal_isolation_params = state
+                        .links
+                        .iter()
+                        .find(|link| link.name == "vocal_isolation")
+                        .and_then(|link| link.vocal_isolation_params);
                     profile.link_bypass = state
                         .links
                         .iter()
@@ -486,6 +503,8 @@ impl EngineManager {
             profile.gate_params = PresetFactory::gate_params(preset);
             profile.feedback_params = None; // Reset al cambiar de preset.
             profile.pitch_correction_params = None; // Reset al cambiar de preset.
+            profile.sculpt_params = None; // Reset al cambiar de preset.
+            profile.vocal_isolation_params = None; // Reset al cambiar de preset.
             profile.global_bypass = false;
             profile.link_bypass.clear();
         });
@@ -668,6 +687,30 @@ impl EngineManager {
     ) -> Result<(), EngineError> {
         let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
         dsp.set_de_esser(params)?;
+        Ok(())
+    }
+
+    pub fn set_sculpt(
+        &mut self,
+        params: voxlfa_core::protocol::SculptParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_sculpt(params)?;
+        self.update_current_profile(|profile| {
+            profile.sculpt_params = Some(params);
+        });
+        Ok(())
+    }
+
+    pub fn set_vocal_isolation(
+        &mut self,
+        params: voxlfa_core::protocol::VocalIsolationParams,
+    ) -> Result<(), EngineError> {
+        let dsp = self.dsp.as_ref().ok_or(EngineError::NotRunning)?;
+        dsp.set_vocal_isolation(params)?;
+        self.update_current_profile(|profile| {
+            profile.vocal_isolation_params = Some(params);
+        });
         Ok(())
     }
 

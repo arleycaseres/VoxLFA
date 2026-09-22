@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::{
     DelayParams, DenoiseParams, DynamicEqParams, EqBand, FeedbackSuppressorParams,
     HarmonizerParams, NoiseGateParams, PitchCorrectionParams, PresetId, ReverbParams,
-    SaturatorParams,
+    SaturatorParams, SculptParams, VocalIsolationParams,
 };
 use crate::Result;
 
@@ -104,6 +104,14 @@ pub struct DeviceProfile {
     /// ajustaron en vivo; `None` = usar los del preset.
     #[serde(default)]
     pub harmonizer_params: Option<HarmonizerParams>,
+    /// Parámetros de Sculpt si el preset de este perfil lo tiene y se ajustaron
+    /// en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub sculpt_params: Option<SculptParams>,
+    /// Parámetros de aislamiento de voz si el preset de este perfil lo tiene y
+    /// se ajustaron en vivo; `None` = usar los del preset.
+    #[serde(default)]
+    pub vocal_isolation_params: Option<VocalIsolationParams>,
     /// `true` si el bypass global estaba activo al guardar.
     #[serde(default)]
     pub global_bypass: bool,
@@ -142,6 +150,8 @@ impl AppConfig {
             saturator_params: None,
             dynamic_eq_params: None,
             harmonizer_params: None,
+            sculpt_params: None,
+            vocal_isolation_params: None,
             global_bypass: false,
             link_bypass: HashMap::new(),
         });
@@ -330,6 +340,8 @@ mod tests {
         assert!(json.contains("\"eqBands\":[]"));
         assert!(json.contains("\"gateParams\":null"));
         assert!(json.contains("\"denoiseParams\":null"));
+        assert!(json.contains("\"sculptParams\":null"));
+        assert!(json.contains("\"vocalIsolationParams\":null"));
         assert!(json.contains("\"globalBypass\":false"));
         assert!(json.contains("\"linkBypass\":{}"));
     }

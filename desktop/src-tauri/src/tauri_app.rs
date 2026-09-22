@@ -687,6 +687,28 @@ fn set_de_esser(
     engine.set_de_esser(params).map_err(|err| err.to_string())
 }
 
+/// Ajusta los parámetros de Sculpt del preset activo en vivo.
+#[tauri::command]
+fn set_sculpt(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::SculptParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine.set_sculpt(params).map_err(|err| err.to_string())
+}
+
+/// Ajusta los parámetros de aislamiento de voz del preset activo en vivo.
+#[tauri::command]
+fn set_vocal_isolation(
+    state: State<AppState>,
+    params: voxlfa_core::protocol::VocalIsolationParams,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().map_err(|err| err.to_string())?;
+    engine
+        .set_vocal_isolation(params)
+        .map_err(|err| err.to_string())
+}
+
 /// Pide sugerencias al asesor de IA (Groq) con las métricas actuales.
 ///
 /// Ejecuta la petición HTTP en un hilo bloqueante para no bloquear la UI.
@@ -866,6 +888,8 @@ pub fn run() {
             set_harmonizer,
             set_compressor,
             set_de_esser,
+            set_sculpt,
+            set_vocal_isolation,
             request_ai_suggestions,
             get_ai_suggestions,
             get_config,

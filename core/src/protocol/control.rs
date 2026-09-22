@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use super::dsp::{
     DelayParams, DenoiseParams, DynamicEqParams, FeedbackSuppressorParams, HarmonizerParams,
-    NoiseGateParams, PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams,
+    NoiseGateParams, PitchCorrectionParams, PresetId, ReverbParams, SaturatorParams, SculptParams,
+    VocalIsolationParams,
 };
 
 /// Comando de control del motor, enviado por la UI (o el móvil) hacia el core.
@@ -103,5 +104,15 @@ pub enum ControlCommand {
     SetHarmonizer {
         /// Nuevos parámetros del harmonizer.
         params: HarmonizerParams,
+    },
+    /// Ajusta los parámetros de Sculpt del preset activo (motor corriendo).
+    SetSculpt {
+        /// Nuevos parámetros de Sculpt.
+        params: SculptParams,
+    },
+    /// Ajusta los parámetros de aislamiento de voz del preset activo (motor corriendo).
+    SetVocalIsolation {
+        /// Nuevos parámetros de aislamiento de voz.
+        params: VocalIsolationParams,
     },
 }

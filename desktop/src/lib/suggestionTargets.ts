@@ -97,6 +97,18 @@ export function getActionTarget(action: AnyAction): ActionTarget | null {
         control: `Banda ${(action as any).bandIndex + 1}`,
         detail: `makeup ${(action as any).makeupDb} dB`,
       };
+    case "setSculpt":
+      return {
+        panel: "Sculpt",
+        control: "Tono / Mezcla",
+        detail: `tono ${Math.round((action as any).tone * 100)}%, ${Math.round((action as any).mix * 100)}%`,
+      };
+    case "setVocalIsolation":
+      return {
+        panel: "Aislamiento de voz",
+        control: "Intensidad / Mezcla",
+        detail: `${Math.round((action as any).strength * 100)}% / ${Math.round((action as any).mix * 100)}%`,
+      };
   }
 
   return null;
