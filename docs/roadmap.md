@@ -524,6 +524,40 @@ y de-esser desde la UI.
       `DspLinkState` en los tres lados (Rust, desktop TS, mobile TS).
 - [x] Verificación completa (fmt, clippy, tests, build desktop, tsc mobile).
 
+## Fase 12 — Sculpt + Aislamiento de voz en tiempo real ✅
+
+Objetivo: añadir un control tonal de un solo botón (Sculpt) y un pre-procesado
+de aislamiento vocal en tiempo real (comb guiado por detección de
+fundamental), end-to-end en core, escritorio y móvil.
+
+- [x] **Sculpt**: `SculptParams { tone, mix }` en `core/src/protocol/dsp.rs`;
+      procesador `core/src/dsp/sculpt.rs` con tres biquads (low-shelf 250 Hz,
+      peaking 3 kHz, high-shelf 8.5 kHz) cuyas ganancias dependen de `tone`;
+      `tone=0.5` es identidad; latencia 0; `DspModuleKind::Sculpt`.
+- [x] **Aislamiento de voz**: `VocalIsolationParams { strength, mix }` en
+      `core/src/protocol/dsp.rs`; procesador `core/src/dsp/vocal_isolation.rs`
+      (filtro comb con retardo fraccional guiado por `YinPitchDetector`
+      reutilizado de `pitch_correction.rs`, envolvente ataque/release,
+      preasignación de buffers sin alloc en el callback); `DspModuleKind::VocalIsolation`.
+- [x] **Presets**: `VocalIsolation` (strength 0.45, mix 0.35) en `vozLimpia`
+      tras el pasa-altos; `Sculpt` (tone 0.5, mix 0.4) en `warm` y `foh`.
+- [x] **Cadena en vivo**: `DspCommand::SetLinkSculpt`/`SetLinkVocalIsolation`,
+      métodos `set_sculpt`/`set_vocal_isolation` en `DspHandle`, `state()`,
+      `sculptParams`/`vocalIsolationParams` en `DspLinkState`.
+- [x] **Escritorio Rust**: `set_sculpt`/`set_vocal_isolation` en `EngineManager`
+      (+ reaplicación en `complete_start`, volcado en `stop`, reset en
+      `apply_preset`), tauri commands `set_sculpt`/`set_vocal_isolation`
+      registrados, `ControlCommand` y `SuggestionAction` en `ws.rs`.
+- [x] **Sugerencias**: `SuggestionAction::SetSculpt { tone, mix }` y
+      `SetVocalIsolation { strength, mix }` aplicados en `analysis/handle.rs`.
+- [x] **UI escritorio**: `SculptPanel.tsx` y `VocalIsolationPanel.tsx` en la
+      categoría "Procesamiento básico", labels/iconos en `DspChain.tsx`,
+      `suggestionTargets.ts`, CSS de paneles.
+- [x] **Espejo móvil**: `protocol.ts` con `SculptParams`, `VocalIsolationParams`,
+      campos de `DspLinkState`, variantes de `ControlCommand` y `SuggestionAction`.
+- [x] Verificación completa (fmt, clippy -D warnings, tests, build desktop,
+      tsc mobile).
+
 > **Plan de fases** (actualizado):
 >
 > - **Fase 9** ✅: Delay + Reverb multi-modo
@@ -532,6 +566,32 @@ y de-esser desde la UI.
 > - **Fase 11.1** ✅: UI Simple/Avanzada, reorganización de paneles en categorías,
 >       live-tuning de compresor y de-esser, sincronización de protocolo en los
 >       tres lados (Rust, desktop, móvil)
-> - **Fase 12** (futuro): Módulo "Sculpt" (un solo control de tono),
->       Aislamiento de voz en tiempo real, Corrección adaptativa de sala,
->       Mejora vocal con IA
+> - **Fase 12** ✅: Módulo "Sculpt" (un solo control de tono) y Aislamiento de
+>       voz en tiempo real, end-to-end (core, escritorio, móvil)
+> - **Fase 13** (futuro): Corrección adaptativa de sala, Mejora vocal con IA
+
+## Auditoría DSP — sonido correcto por defecto ✅ (Lotes 1-2)
+
+Objetivo: recorrer la cadena DSP con **criterio de ingeniero de audio** (no solo
+de programador) y corregir bugs donde el código compila y pasa tests pero la
+señal se procesa mal, no se recupera, o puede volverse NaN/OOM. Metodología,
+hallazgos y estándares en `docs/dsp-auditoria.md`.
+
+- [x] **Lote 1 — Robustez heredada (A0.x)**: harmonizer con intervalos extremos,
+      denoise sin propagar `enabled`, `DenoiseHandle` sin `Drop`, cola fantasma
+      del denoise (A0.5 resultó falso positivo, sin cambios).
+- [x] **Lote 2 — Correcto por defecto (A.1.x)**:
+      - Bandas identidad: de-esser/boomsuppressor y bandas del analizador usaban
+        `Peaking` con gain 0 (= identidad, atenuaban TODO). → `BandPass`.
+      - `dynamic_eq`: el bandpass se procesaba 2 veces por muestra → `(band, wet)`.
+      - `limiter`: pico sin release → quedaba atenuando para siempre → release.
+      - Clamps: `biquad::design` (NaN/`sample_rate 0` → passthrough, q/gain
+        clamp), `saturator` (`tanh` en vez de `exp`), cotas OOM en
+        `delay`/`reverb` (`ms_to_samples` con NaN→0 y tope).
+      - 12 tests de regresión nuevos que demuestran el comportamiento audible.
+- [ ] **Lote 3 — Bandas con ganancia real (EQ/Sculpt/Presets)**: verificar que
+      cada `Peaking`/shelf tiene `gain_db ≠ 0` y suena a lo que promete.
+- [ ] **Lote 4 — Estabilidad de Feedback/Denoise/Pitch/VocalIsolation**:
+      revisar clamps y reinicialización en los módulos con mayor estado interno.
+- [x] Verificación completa (fmt, clippy `-D warnings`, **222 tests**, build
+      desktop, tsc móvil).

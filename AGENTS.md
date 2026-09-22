@@ -61,6 +61,46 @@ cargo test --workspace --no-default-features
   variables sin usar, y lógica incorrecta. No asumir que el código compila solo
   porque lo escribí.
 
+### Reglas de oro del DSP (correcto por defecto)
+
+Estas reglas salen de una auditoría sistemática de la cadena DSP (ver
+`docs/dsp-auditoria.md`). Un módulo DSP **no está terminado** hasta que su
+salida *suena correcta*, no solo porque compila y pasa tests. Cada regla
+corresponde a un bug real ya encontrado; seguirla evita reintroducirlos:
+
+- **Ninguna banda debe ser identidad.** Un biquad `Peaking` con `gain_db = 0.0`
+  es `H(z) ≡ 1` (la identidad): no aísla nada. Si un módulo debe *extraer* una
+  banda (de-esser, boomsuppressor, analizador de bandas) se usa
+  `BiquadKind::BandPass`/`HighPass`/`LowPass`. Un `Peaking` a 0 dB hace que el
+  de-esser atenúe TODO el espectro y que los ratios del analizador sean
+  inútiles (todo ≈ 1). Si es una banda con ganancia real, `Peaking`/shelf con
+  `gain_db ≠ 0`. Antes de escribir un biquad pregúntate: ¿extrae o da ganancia?
+- **Cada filtro se procesa UNA vez por muestra.** Avanzar el estado de un biquad
+  dos veces por muestra (procesado dentro de `process_sample` y de nuevo en el
+  `loop` del caller) corrompe el estado del filtro. Restructurar para procesarlo
+  una sola vez y devolver todo lo que necesite el caller (p. ej. devolver
+  `(band_original, wet)` en vez de reprocesar en el caller).
+- **Todo detector de pico/envolvente debe decaer (release).** Un peak detector
+  que solo sube (`if x > peak { peak = x }`) deja al limitador atornillado a la
+  atenuación máxima para siempre. Aplicar decaimiento (p. ej.
+  `peak *= (1.0 - release_coef)`) antes de la comparación.
+- **Los parámetros de red nunca provocan OOM ni NaN.** Toda entrada que llega de
+  la red (params de protocolo) se acota antes de usarse como tamaño de buffer
+  (`time_ms`, `pre_delay_ms`, `filter_len`, …): `ms_to_samples` debe tener tope
+  superior y convertir NaN a 0 antes de usarse en `DelayLine::new`/`vec![]`.
+- **Numerically stable: `tanh` en vez de `exp`; clamp antes de fórmulas.**
+  `(e^x − e^−x)/(e^x + e^−x) == tanh(x)` pero desborda a NaN/inf con x grande;
+  usar `tanh`. Para `q`, `gain_db`, `drive`, `freq_hz`: verificar `is_finite()`
+  y clamp a un rango físico; un NaN que entra en un biquad contamina la salida
+  para siempre. Degradar a passthrough en vez de propagar NaN.
+- **Tests de regresión que fallarían con el bug.** Cada fix "correcto por
+  defecto" lleva un test que demuestra el comportamiento audible:
+  - seno dentro de la banda → se atenúa (de-esser/boomsuppressor);
+  - seno fuera de la banda → queda intacto (no toca el resto del espectro);
+  - análisis: seno a 300 Hz domina `lowmid_ratio` sobre `mid_ratio`;
+  - limiter: tras un pico transitorio la ganancia recupera ~1;
+  - saturator/delay/reverb con parámetros extremos (huge, NaN) → nunca NaN/OOM.
+
 ### Errores conocidos de cpal/ALSA
 
 - `snd_pcm_hw_params_set_buffer_size` → `EINVAL (22)`: el driver ALSA rechaza
@@ -125,6 +165,12 @@ sin webkit), los tipos en `tauri_app.rs` **no se verifican** con clippy. En
 ese caso, **releer cada tipo manualmente contra la signature de la función
 destino** antes de escribir. Ejemplo: si `AudioEngine::start` recibe
 `mpsc::Sender<EngineEvent>`, no escribas `Option<String>` en la tupla.
+
+### Regla adicional para trabajo DSP
+
+Todo cambio en `core/src/dsp/` que altere el procesamiento debe acompañarse de
+un test de regresión que **falle con el bug** (ver `docs/dsp-auditoria.md`).
+No basta con que compile y los tests existentes pasen.
 
 ## Seguridad (resumen)
 
