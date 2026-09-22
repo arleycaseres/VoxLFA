@@ -90,6 +90,11 @@ const ANALYSIS_CHANNEL_CAPACITY: usize = 64;
 /// y el hilo de denoise.
 const DENOISE_RING_CAPACITY: usize = 4096;
 
+/// Mezcla seco/húmedo por defecto del denoise offloaded si el preset no la
+/// expone (debe ser 1.0 = denoise completo; el blend real lo vuelve a aplicar
+/// el callback).
+const DEFAULT_DENOISE_MIX: f32 = 1.0;
+
 /// Capacidad máxima preasignada para los buffers scratch del callback de audio
 /// (entrada denoise, salida denoise y salida de la cadena DSP). Se elige 4096
 /// (~85 ms a 48 kHz) para cubrir cualquier tamaño de buffer que un dispositivo
@@ -368,6 +373,12 @@ impl AudioEngine {
                 stop_denoise.clone(),
             ) {
                 Ok(handle) => {
+                    // Activar la inferencia offloaded y propagar la mezcla
+                    // seco/húmedo del preset al callback (hasta aquí el hilo
+                    // estaba "dormido" y el denoise nose aplicaba nunca).
+                    denoise_shared.enabled.store(true, Ordering::Relaxed);
+                    let mix = initial_chain.denoise_mix().unwrap_or(DEFAULT_DENOISE_MIX);
+                    denoise_shared.mix.store(mix, Ordering::Relaxed);
                     denoise_handle = Some(handle);
                 }
                 Err(e) => {
@@ -435,6 +446,10 @@ impl AudioEngine {
                     while let Ok(command) = dsp_rx.try_recv() {
                         match command {
                             DspCommand::ApplyPreset(new_chain) => {
+                                if let Some(mix) = new_chain.denoise_mix() {
+                                    denoise_shared.enabled.store(true, Ordering::Relaxed);
+                                    denoise_shared.mix.store(mix, Ordering::Relaxed);
+                                }
                                 chain = *new_chain;
                             }
                             DspCommand::SetGlobalBypass(bypass) => {
@@ -454,6 +469,11 @@ impl AudioEngine {
                                 chain.set_link_gate(processor, params);
                             }
                             DspCommand::SetDenoise { processor, params } => {
+                                // En modo offloaded el blend se aplica en el
+                                // callback con `denoise_shared.mix`; propagar
+                                // el mix en vivo también al hilo de denoise.
+                                denoise_shared.enabled.store(true, Ordering::Relaxed);
+                                denoise_shared.mix.store(params.mix, Ordering::Relaxed);
                                 chain.set_link_denoise(processor, params);
                             }
                             DspCommand::SetFeedbackSuppressor { processor, params } => {
@@ -524,7 +544,12 @@ impl AudioEngine {
                         denoise_out_buf.truncate(samples.len());
                         let n = denoise_out_cons.pop_slice(&mut denoise_out_buf);
 
-                        // d) Mezclar seco/húmedo y procesar módulos post-denoise.
+                        // d) Mezclar seco/húmedo. El hilo de denoise emite
+                        // bloques de MAX_DENOISE_CHUNK (960), que no siempre
+                        // coinciden con `samples.len()`; la cola sobrante no
+                        // debe reutilizar contenido previo del buffer (ghost
+                        // tail), así que la cola se completa con la señal
+                        // pre-denoise, igual que en el fallback de n == 0.
                         if n > 0 {
                             let mix = denoise_shared.mix.load(Ordering::Relaxed);
                             let dry = 1.0 - mix;
@@ -532,7 +557,13 @@ impl AudioEngine {
                                 denoise_out_buf[i] =
                                     denoise_in_buf[i] * dry + denoise_out_buf[i] * mix;
                             }
-                            chain.process_post_denoise(&denoise_out_buf[..n], &mut scratch, &info);
+                            denoise_out_buf[n..samples.len()]
+                                .copy_from_slice(&denoise_in_buf[n..samples.len()]);
+                            chain.process_post_denoise(
+                                &denoise_out_buf[..samples.len()],
+                                &mut scratch,
+                                &info,
+                            );
                         } else {
                             // Sin datos denoiseados aún: usar la señal pre-denoise
                             // como fallback (degradación transparente).

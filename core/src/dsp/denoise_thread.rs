@@ -54,7 +54,6 @@ impl AtomicF32 {
     }
 
     /// Almacena un nuevo valor.
-    #[allow(dead_code)]
     pub fn store(&self, val: f32, order: Ordering) {
         self.storage.store(val.to_bits(), order);
     }
@@ -69,6 +68,18 @@ pub struct DenoiseHandle {
 impl DenoiseHandle {
     /// Solicita la detención del hilo y espera a que termine.
     pub fn stop(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.thread.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for DenoiseHandle {
+    fn drop(&mut self) {
+        // El hilo vive en el fondo aunque el motor se detenga sin llamar a
+        // `stop()` (p. ej. al soltar la cadena de streams): en cuanto se
+        // descarta el mango, hay que parar y unir el hilo para no fugarlo.
         self.stop.store(true, Ordering::Relaxed);
         if let Some(handle) = self.thread.take() {
             let _ = handle.join();

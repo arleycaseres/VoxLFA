@@ -18,6 +18,11 @@ const MAX_INTERVALS: usize = 8;
 /// Número máximo de copias por intervalo.
 const MAX_VOICES_PER_INTERVAL: usize = 4;
 
+/// Rango máximo de desplazamiento en semitonos (±4 octavas). Valores fuera de
+/// este rango no tienen sentido musical y producen tasas de lectura que pueden
+/// desbordar `f32` a infinito, colgando el hilo de audio en el bucle de avance.
+const MAX_SEMITONES: i32 = 48;
+
 /// Longitud del buffer del pitch shifter (muestras). Debe cubrir al menos
 /// 50 ms a 48 kHz para evitar artefactos en notas graves.
 const SHIFTER_BUF_LEN: usize = 4096;
@@ -64,6 +69,12 @@ impl PitchShifter {
 
     fn process_sample(&mut self, input: f32) -> f32 {
         let len = self.buf.len() as f32;
+
+        // Defensa en profundidad: un read_rate no finito (p. ej. por NaN
+        // propagado) colgaría el callback en el bucle de avance de `read_pos`.
+        if !self.read_rate.is_finite() {
+            return 0.0;
+        }
 
         // Escribir entrada en el buffer circular.
         self.buf[self.write_pos] = input;
@@ -154,6 +165,9 @@ impl Harmonizer {
             if voices.len() >= MAX_INTERVALS * MAX_VOICES_PER_INTERVAL {
                 break;
             }
+            // Clamp de seguridad: evita read_rate = Inf y el bucle infinito en
+            // el callback de audio si llega un intervalo descontrolado por red.
+            let semitones = semitones.clamp(-MAX_SEMITONES, MAX_SEMITONES);
             for v in 0..voices_per {
                 // Pequeño detuning entre copias para crear efecto de coro (±5 cents).
                 let detune_cents = if voices_per > 1 {
@@ -384,6 +398,25 @@ mod tests {
             rms_out > 0.001,
             "harmonizer produce silencio: rms={rms_out}"
         );
+    }
+
+    #[test]
+    fn extreme_intervals_do_not_hang_or_panic() {
+        // Antes del clamp este caso producía read_rate = Inf y un bucle
+        // infinito en el callback de audio (DoS).
+        let params = HarmonizerParams {
+            intervals: vec![i32::MAX, i32::MIN],
+            mix: 0.5,
+            voices_per_interval: 4,
+        };
+        let mut proc = Harmonizer::from_params(&params, 48_000);
+        let input = vec![0.1; 2048];
+        let mut output = vec![0.0; 2048];
+        proc.process(&input, &mut output, &info());
+
+        for (a, b) in input.iter().zip(output.iter()) {
+            assert!(a.is_finite() && b.is_finite(), "salida no finita");
+        }
     }
 
     #[test]

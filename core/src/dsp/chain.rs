@@ -648,6 +648,15 @@ impl ChainProcessor {
         self.denoise_idx.is_some()
     }
 
+    /// Mezcla seco/húmedo actual del eslabón de denoise (0.0–1.0), o `None`
+    /// si la cadena no tiene denoise.
+    pub fn denoise_mix(&self) -> Option<f32> {
+        self.denoise_idx
+            .and_then(|idx| self.links.get(idx))
+            .and_then(|link| link.denoise_params)
+            .map(|params| params.mix)
+    }
+
     /// Procesa la cadena hasta el eslabón de denoise (excluyéndolo).
     ///
     /// Se usa cuando el denoise se ejecuta en un hilo dedicado: el callback
