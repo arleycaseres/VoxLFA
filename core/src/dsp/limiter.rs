@@ -62,11 +62,15 @@ impl AudioProcessor for Limiter {
 
         for i in 0..frames {
             // 1) Detector con mirada al futuro: máximo pico en la ventana.
+            //    El pico decae con el release: si no llegan más picos altos,
+            //    la atenuación se recupera (sin esto quedaría atornillado a
+            //    la reducción máxima para siempre).
             let in_future = if i + self.lookahead_samples < frames {
                 input[i + self.lookahead_samples]
             } else {
                 input[frames - 1]
             };
+            self.peak *= (1.0 - self.release_coef).max(0.0);
             if in_future.abs() > self.peak {
                 self.peak = in_future.abs();
             }
@@ -147,5 +151,31 @@ mod tests {
         let last = out[out.len() - 1];
         // La señal por debajo del techo debe pasar casi intacta.
         assert!((last - 0.05).abs() < 1e-4, "got {last}");
+    }
+
+    #[test]
+    fn gain_recovers_after_transient_peak() {
+        // Tras un pico transitorio por encima del techo, el limitador debe
+        // recuperar la unidad de ganancia (no quedarse atenuando para siempre).
+        let sr = 48_000;
+        let mut lim = Limiter::new(-1.0, 3.0, 50.0, sr);
+        let n = sr as usize;
+        let mut input = vec![0.02; n];
+        // Un pico único de 1.4 (por encima de 0 dBFS) en la mitad.
+        input[n / 2] = 1.4;
+        let mut out = vec![0.0; n];
+        let info = ProcessingInfo {
+            sample_rate: sr,
+            frames: n,
+        };
+        lim.process(&input, &mut out, &info);
+        // Al final del buffer (muy después del pico) la ganancia debe volver a
+        // ~1, así que la señal baja debe recuperar su nivel original.
+        let tail = &out[3 * n / 4..];
+        let mean_tail = tail.iter().map(|v| v.abs()).sum::<f32>() / tail.len() as f32;
+        assert!(
+            (mean_tail - 0.02).abs() < 0.005,
+            "gain stuck: tail mean {mean_tail:.5} != ~0.02"
+        );
     }
 }

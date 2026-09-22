@@ -12,13 +12,11 @@ use crate::protocol::dsp::SaturatorMode;
 /// Función de saturación tipo tubo: soft clipping asimétrico con armónicos pares.
 ///
 /// `drive` controla la ganancia antes de la función. Valores altos producen
-/// más armónicos pares (calidez musical).
+/// más armónicos pares (calidez musical). Usa `tanh` (estable: nunca devuelve
+/// NaN/inf aunque `drive * sample` sea enorme).
 fn tube_saturate(sample: f32, drive: f32) -> f32 {
-    let x = drive * sample;
-    // Asimetría suave: armónicos pares dominantes.
-    let neg = (-x).exp();
-    let pos = x.exp();
-    (pos - neg) / (pos + neg)
+    let x = (drive * sample).clamp(-48.0, 48.0);
+    x.tanh()
 }
 
 /// Función de saturación tipo cinta: compresión suave con soft knee.
@@ -26,7 +24,7 @@ fn tube_saturate(sample: f32, drive: f32) -> f32 {
 /// La cinta tiene unAtPath diferente: compresión simétrica más suave que el
 /// tubo, con un ligero rolloff de agudos (modelado con un filtro LP simple).
 fn tape_saturate(sample: f32, drive: f32) -> f32 {
-    let x = drive * sample;
+    let x = (drive * sample).clamp(-48.0, 48.0);
     // Soft clipping suave con soften knee.
     x / (1.0 + x.abs().powf(1.5))
 }
@@ -201,6 +199,27 @@ mod tests {
         for v in out {
             assert!(v.abs() <= 1.0, "tubetape output {v} > 1");
         }
+    }
+
+    #[test]
+    fn extreme_drive_never_produces_nan() {
+        // drive + sample enormes no deben producir NaN/inf (antes `exp`
+        // desbordaba a inf/inf = NaN).
+        let mut sat = Saturator::new(SaturatorMode::Tube, 1e6, 1.0, 48_000);
+        let input = [1e6, -1e6, 3.0, -4.0];
+        let mut out = [0.0; 4];
+        sat.process(&input, &mut out, &info());
+        assert!(out.iter().all(|v| v.is_finite()), "tube NaN: {out:?}");
+
+        let mut sat = Saturator::new(SaturatorMode::Tape, 1e6, 1.0, 48_000);
+        let mut out = [0.0; 4];
+        sat.process(&input, &mut out, &info());
+        assert!(out.iter().all(|v| v.is_finite()), "tape NaN: {out:?}");
+
+        let mut sat = Saturator::new(SaturatorMode::TubeTape, 1e6, 1.0, 48_000);
+        let mut out = [0.0; 4];
+        sat.process(&input, &mut out, &info());
+        assert!(out.iter().all(|v| v.is_finite()), "tubetape NaN: {out:?}");
     }
 
     #[test]

@@ -73,9 +73,9 @@ impl BandSplitter {
             // Graves: lo que queda por debajo de ~200 Hz.
             low: design(BiquadKind::LowPass, 200.0, 0.707),
             // Baja-media: la zona de *boominess* (~250–350 Hz).
-            lowmid: design(BiquadKind::Peaking, 300.0, 1.5),
+            lowmid: design(BiquadKind::BandPass, 300.0, 1.5),
             // Media: presencia vocal (~1.2 kHz).
-            mid: design(BiquadKind::Peaking, 1200.0, 1.5),
+            mid: design(BiquadKind::BandPass, 1200.0, 1.5),
             // Agudos: brillo / sibilancia (por encima de ~4 kHz).
             high: design(BiquadKind::HighPass, 4000.0, 0.707),
             sum_low: 0.0,
@@ -215,5 +215,37 @@ mod tests {
         let second = splitter.frame();
         assert!(first.rms_db > -120.0);
         assert!(second.rms_db <= -120.0, "acumuladores deben reiniciarse");
+    }
+
+    #[test]
+    fn lowmid_band_isolates_boom_frequency() {
+        // Un seno en la zona de boom (~300 Hz) debe dominar `lowmid_ratio`
+        // sobre `mid_ratio`. Con las antiguas "bandas" Peaking a 0 dB (que
+        // eran la identidad) ambas razones eran ~1 y la métrica no aislaba.
+        let sr = 48_000;
+        let mut splitter = BandSplitter::new(sr);
+        splitter.process(&sine(300.0, sr, 0.2));
+        let frame = splitter.frame();
+        assert!(
+            frame.lowmid_ratio > frame.mid_ratio,
+            "boom band must dominate lowmid: lowmid={:.3}, mid={:.3}",
+            frame.lowmid_ratio,
+            frame.mid_ratio
+        );
+    }
+
+    #[test]
+    fn mid_band_isolates_presence_frequency() {
+        // Análogo: un seno a ~1.2 kHz debe dominar `mid_ratio` sobre `lowmid`.
+        let sr = 48_000;
+        let mut splitter = BandSplitter::new(sr);
+        splitter.process(&sine(1200.0, sr, 0.2));
+        let frame = splitter.frame();
+        assert!(
+            frame.mid_ratio > frame.lowmid_ratio,
+            "presence band must dominate mid: mid={:.3}, lowmid={:.3}",
+            frame.mid_ratio,
+            frame.lowmid_ratio
+        );
     }
 }

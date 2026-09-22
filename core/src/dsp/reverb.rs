@@ -212,7 +212,12 @@ impl Reverb {
 }
 
 fn ms_to_samples(ms: f32, sample_rate: f32) -> usize {
-    (ms.max(0.0) * sample_rate / 1000.0).ceil() as usize
+    let clamped = if ms.is_nan() {
+        0.0
+    } else {
+        ms.clamp(0.0, 2000.0)
+    };
+    (clamped * sample_rate / 1000.0).ceil() as usize
 }
 
 #[cfg(test)]
@@ -319,5 +324,40 @@ mod tests {
             hall_late > room_late,
             "hall debería tener cola más larga que room (hall={hall_late}, room={room_late})"
         );
+    }
+
+    #[test]
+    fn huge_pre_delay_is_capped_not_oom() {
+        // Pre-delay gigante desde la red no debe provocar asignación masiva.
+        let params = ReverbParams {
+            mode: ReverbMode::Hall,
+            room_size: 0.8,
+            damping: 0.2,
+            wet: 1.0,
+            pre_delay_ms: 1e9,
+            high_cut_hz: 18000.0,
+            low_cut_hz: 50.0,
+        };
+        let reverb = Reverb::from_params(params, 48_000);
+        let pre = reverb.pre_delay_line.buffer.len();
+        assert!(
+            pre < 48_000 * 3,
+            "pre-delay sin cota: {pre} muestras ({pre} > ~2 s)"
+        );
+    }
+
+    #[test]
+    fn nan_param_does_not_panic() {
+        let params = ReverbParams {
+            mode: ReverbMode::Hall,
+            room_size: f32::NAN,
+            damping: f32::NAN,
+            wet: f32::NAN,
+            pre_delay_ms: f32::NAN,
+            high_cut_hz: f32::NAN,
+            low_cut_hz: f32::NAN,
+        };
+        let reverb = Reverb::from_params(params, 48_000);
+        assert!(reverb.pre_delay_line.buffer.len() < 48_000 * 3);
     }
 }

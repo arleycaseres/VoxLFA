@@ -108,8 +108,13 @@ impl Delay {
 
     /// Crea un delay a partir de parámetros del protocolo.
     pub fn from_params(params: DelayParams, sample_rate: u32) -> Self {
+        // Cotas defensivas: tiempos y frecuencias fuera de rango se acotan
+        // para evitar asignaciones masivas (OOM) o filtros inestables.
+        let time_ms = params.time_ms.clamp(0.0, 2000.0);
+        let pre_delay_ms = params.pre_delay_ms.clamp(0.0, 1000.0);
+
         // El delay efectivo incluye pre-delay.
-        let effective_ms = params.time_ms + params.pre_delay_ms;
+        let effective_ms = time_ms + pre_delay_ms;
         let max_delay_samples = ms_to_samples(effective_ms, sample_rate).max(1);
 
         let low_cut = BiquadFilter::design(
@@ -132,8 +137,8 @@ impl Delay {
             sample_rate,
         );
 
-        let base_delay_samples = ms_to_samples(params.time_ms, sample_rate) as f32;
-        let pre_delay_samples = ms_to_samples(params.pre_delay_ms, sample_rate);
+        let base_delay_samples = ms_to_samples(time_ms, sample_rate) as f32;
+        let pre_delay_samples = ms_to_samples(pre_delay_ms, sample_rate);
 
         // Para Slapback: forzar feedback a 0.
         let feedback = if matches!(params.mode, DelayMode::Slapback) {
@@ -149,7 +154,7 @@ impl Delay {
             pre_delay_samples,
             feedback,
             mix: params.mix.clamp(0.0, 1.0),
-            time_ms: params.time_ms,
+            time_ms,
             low_cut,
             high_cut,
             duck_amount: params.duck_amount.clamp(0.0, 1.0),
@@ -266,8 +271,16 @@ impl AudioProcessor for Delay {
 }
 
 /// Convierte un tiempo en ms a muestras (redondeando hacia arriba).
+///
+/// Cota defensiva: valores no finitos o fuera de un máximo razonable se
+/// aplanan para no provocar asignaciones masivas de buffer.
 fn ms_to_samples(ms: f32, sample_rate: u32) -> usize {
-    (ms.max(0.0) * sample_rate as f32 / 1000.0).ceil() as usize
+    let clamped = if ms.is_nan() {
+        0.0
+    } else {
+        ms.clamp(0.0, 5000.0)
+    };
+    (clamped * sample_rate as f32 / 1000.0).ceil() as usize
 }
 
 #[cfg(test)]
@@ -464,6 +477,53 @@ mod tests {
         assert!(
             eco_level < 0.9,
             "ducking no está funcionando: eco={eco_level}"
+        );
+    }
+
+    #[test]
+    fn huge_times_are_capped_not_oom() {
+        // Tiempos gigantes desde la red no deben provocar asignaciones
+        // masivas (antes ms_to_samples escalaba sin cota → OOM).
+        let params = DelayParams {
+            mode: DelayMode::Digital,
+            time_ms: 1e9,
+            feedback: 0.0,
+            mix: 1.0,
+            pre_delay_ms: 1e9,
+            low_cut_hz: 50.0,
+            high_cut_hz: 18000.0,
+            tempo_bpm: 120.0,
+            sync_enabled: false,
+            duck_amount: 0.0,
+        };
+        let delay = Delay::from_params(params, 48_000);
+        assert!(
+            delay.line.buffer.len() <= ms_to_samples(3000.0, 48_000) + 1,
+            "buffer de delay sin cota: {}",
+            delay.line.buffer.len()
+        );
+        assert_eq!(delay.time_ms(), 2000.0, "time_ms debe acotarse a 2000");
+    }
+
+    #[test]
+    fn nan_times_degrade_to_zero_delay() {
+        let params = DelayParams {
+            mode: DelayMode::Digital,
+            time_ms: f32::NAN,
+            feedback: f32::NAN,
+            mix: f32::NAN,
+            pre_delay_ms: f32::NAN,
+            low_cut_hz: 50.0,
+            high_cut_hz: 18000.0,
+            tempo_bpm: 120.0,
+            sync_enabled: false,
+            duck_amount: f32::NAN,
+        };
+        let delay = Delay::from_params(params, 48_000);
+        assert!(!delay.line.buffer.is_empty());
+        assert!(
+            delay.line.buffer.len() < 48_000,
+            "NaN no debe expandir el buffer"
         );
     }
 }

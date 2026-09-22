@@ -56,12 +56,13 @@ impl DynamicEqBand {
     }
 
     /// Procesa un solo sample: extrae banda, detecta envolvente, aplica
-    /// compresión y devuelve la señal de la banda con ganancia aplicada.
+    /// compresión y devuelve la banda original y la banda con ganancia
+    /// aplicada.
     ///
-    /// El resultado es la banda con su ganancia modificada; el caller suma
-    /// `input + band * (gain - 1)` para reconstruir la señal.
-    fn process_sample(&mut self, input: f32) -> f32 {
-        // 1) Extraer la banda con el pasabanda.
+    /// El bandpass se procesa una única vez por muestra; el caller reconstruye
+    /// con `input + wet - band_original` (solo se modifica la banda activa).
+    fn process_sample(&mut self, input: f32) -> (f32, f32) {
+        // 1) Extraer la banda con el pasabanda (una sola pasada).
         let band = self.bandpass.process(input);
 
         // 2) Detector de envolvente (pico con suavizado).
@@ -92,7 +93,8 @@ impl DynamicEqBand {
 
         // 5) Ganancia aplicada a la banda.
         let gain = 10f32.powf(-self.gr_smooth_db / 20.0) * self.makeup_linear;
-        band * gain
+        let wet = band * gain;
+        (band, wet)
     }
 
     fn reset(&mut self) {
@@ -141,8 +143,7 @@ impl AudioProcessor for DynamicEq {
         for band in &mut self.bands {
             for out_sample in output[..frames].iter_mut() {
                 let dry = *out_sample;
-                let wet_band = band.process_sample(dry);
-                let band_original = band.bandpass.process(dry);
+                let (band_original, wet_band) = band.process_sample(dry);
                 *out_sample = dry + wet_band - band_original;
             }
         }

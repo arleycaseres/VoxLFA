@@ -62,18 +62,28 @@ impl BiquadCoeffs {
     /// `sample_rate` debe ser > 0 y `freq_hz` en `(0, Nyquist)`; de lo
     /// contrario el filtro se degrada a paso directo (resultado seguro).
     pub fn design(params: BiquadParams, sample_rate: u32) -> Self {
-        if sample_rate == 0 || !params.freq_hz.is_finite() || params.freq_hz <= 0.0 {
+        // Cotas defensivas: parámetros no finitos o fuera de rango degradan el
+        // filtro a paso directo en vez de producir NaN/inf en el audio.
+        if sample_rate == 0
+            || !params.freq_hz.is_finite()
+            || params.freq_hz <= 0.0
+            || !params.gain_db.is_finite()
+            || !params.q.is_finite()
+        {
             return Self::passthrough();
         }
         let nyquist = sample_rate as f32 * 0.5;
         let f0 = params.freq_hz.min(nyquist * 0.99).max(1.0);
-        let q = params.q.max(0.01);
+        // Q finito y acotado: Q < 0.01 o > 100 es numéricamente inestable.
+        let q = params.q.clamp(0.01, 100.0);
+        // Ganancia acotada a ±24 dB: fuera de ahí los coeficientes se degradan.
+        let gain_db = params.gain_db.clamp(-24.0, 24.0);
 
         let w0 = 2.0 * PI * f0 / sample_rate as f32;
         let cos = w0.cos();
         let sin = w0.sin();
         let alpha = sin / (2.0 * q);
-        let a = 10f32.powf(params.gain_db / 40.0);
+        let a = 10f32.powf(gain_db / 40.0);
         let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
 
         let (mut b0, mut b1, mut b2, a0, mut a1, mut a2) = match params.kind {
@@ -292,5 +302,60 @@ mod tests {
             0,
         );
         assert_eq!(f.coeffs, BiquadCoeffs::passthrough());
+    }
+
+    #[test]
+    fn non_finite_params_degrade_to_passthrough() {
+        // NaN en q/gain/freq o sample_rate 0 → paso directo (sin NaN/inf).
+        let nan = f32::NAN;
+        let f = BiquadFilter::design(
+            BiquadParams {
+                kind: BiquadKind::Peaking,
+                freq_hz: 1000.0,
+                gain_db: 0.0,
+                q: nan,
+            },
+            48_000,
+        );
+        assert_eq!(f.coeffs, BiquadCoeffs::passthrough());
+
+        let f = BiquadFilter::design(
+            BiquadParams {
+                kind: BiquadKind::Peaking,
+                freq_hz: 1000.0,
+                gain_db: nan,
+                q: 1.0,
+            },
+            48_000,
+        );
+        assert_eq!(f.coeffs, BiquadCoeffs::passthrough());
+
+        let f = BiquadFilter::design(
+            BiquadParams {
+                kind: BiquadKind::LowPass,
+                freq_hz: 1000.0,
+                gain_db: 0.0,
+                q: 1.0,
+            },
+            0,
+        );
+        assert_eq!(f.coeffs, BiquadCoeffs::passthrough());
+    }
+
+    #[test]
+    fn extreme_q_and_gain_are_clamped_not_nan() {
+        // Q fuera de rango y ganancia extrema no deben producir NaN/inf.
+        let f = BiquadFilter::design(
+            BiquadParams {
+                kind: BiquadKind::Peaking,
+                freq_hz: 1000.0,
+                gain_db: 1000.0,
+                q: 1e9,
+            },
+            48_000,
+        );
+        let c = f.coeffs;
+        assert!(c.b0.is_finite() && c.b1.is_finite() && c.b2.is_finite());
+        assert!(c.a1.is_finite() && c.a2.is_finite());
     }
 }

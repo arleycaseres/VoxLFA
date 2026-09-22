@@ -33,7 +33,7 @@ impl BoomSuppressor {
     pub fn new(threshold_db: f32, freq_hz: f32, amount: f32, sample_rate: u32) -> Self {
         let band = BiquadFilter::design(
             BiquadParams {
-                kind: BiquadKind::Peaking,
+                kind: BiquadKind::BandPass,
                 freq_hz,
                 gain_db: 0.0,
                 q: 1.0,
@@ -137,6 +137,30 @@ mod tests {
         let rms_in = rms(&input[n / 2..]);
         let rms_out = rms(&out[n / 2..]);
         assert!(rms_out < rms_in * 0.7, "boominess not reduced");
+    }
+
+    #[test]
+    fn off_band_signal_is_not_affected() {
+        // Un seno fuera de la banda baja-media NO debe atenuarse. Con la
+        // "banda" identidad previa (Peaking a 0 dB) reducía todo el espectro.
+        let sr = 48_000;
+        let mut boom = BoomSuppressor::new(-20.0, 250.0, 1.0, sr);
+        let n = 8192;
+        let input: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * 3000.0 * i as f32 / sr as f32).sin())
+            .collect();
+        let mut out = vec![0.0; n];
+        let info = ProcessingInfo {
+            sample_rate: sr,
+            frames: n,
+        };
+        boom.process(&input, &mut out, &info);
+        let rms_in = rms(&input[n / 2..]);
+        let rms_out = rms(&out[n / 2..]);
+        assert!(
+            (rms_out - rms_in).abs() < rms_in * 0.2,
+            "off-band signal altered: in={rms_in:.6}, out={rms_out:.6}"
+        );
     }
 
     fn rms(x: &[f32]) -> f32 {
