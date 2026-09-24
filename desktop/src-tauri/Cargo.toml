@@ -56,7 +56,9 @@ local-ip-address = "0.6"
 mdns-sd = { version = "0.21", features = ["async", "log", "logging"] }
 
 # Envío HTTP de telemetría (solo eventos anónimos, opt-in).
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+# `rustls-tls` en vez de `native-tls` (default) evita depender de libssl del
+# sistema en el enlazado: rustls es puro Rust (ring), sin `-lssl`/`-lcrypto`.
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
 
 # Utilities
 log = "0.4"
