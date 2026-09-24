@@ -396,182 +396,184 @@ impl AudioEngine {
         let tx_spectrum = tx.clone();
 
         log("config de streams lista");
-        let input_stream = input
-            .build_input_stream::<f32, _, _>(
-                &input_config,
-                move |samples: &[f32], _info: &cpal::InputCallbackInfo| {
-                    // Este callback corre en el hilo de audio: O(n), sin
-                    // bloqueos ni asignaciones.
-                    if samples.is_empty() || stop_capture.load(Ordering::Relaxed) {
-                        return;
-                    }
+        let input_result = input.build_input_stream::<f32, _, _>(
+            &input_config,
+            move |samples: &[f32], _info: &cpal::InputCallbackInfo| {
+                // Este callback corre en el hilo de audio: O(n), sin
+                // bloqueos ni asignaciones.
+                if samples.is_empty() || stop_capture.load(Ordering::Relaxed) {
+                    return;
+                }
 
-                    // 0) Aplicar comandos DSP pendientes (preset/bypass). El
-                    //    `ApplyPreset` llega con la cadena ya construida; aquí
-                    //    solo se intercambia y se libera la anterior.
-                    while let Ok(command) = dsp_rx.try_recv() {
-                        match command {
-                            DspCommand::ApplyPreset(new_chain) => {
-                                chain = *new_chain;
-                            }
-                            DspCommand::SetGlobalBypass(bypass) => {
-                                chain.set_global_bypass(bypass);
-                            }
-                            DspCommand::SetLinkBypass { name, bypass } => {
-                                chain.set_link_bypass(&name, bypass);
-                            }
-                            DspCommand::SetLinkProcessor {
-                                name,
-                                processor,
-                                eq_bands,
-                            } => {
-                                chain.set_link_processor(&name, processor, eq_bands);
-                            }
-                            DspCommand::SetLinkGate { processor, params } => {
-                                chain.set_link_gate(processor, params);
-                            }
-                            DspCommand::SetDenoise { processor, params } => {
-                                chain.set_link_denoise(processor, params);
-                            }
-                            DspCommand::SetFeedbackSuppressor { processor, params } => {
-                                chain.set_link_feedback(processor, params);
-                            }
-                            DspCommand::SetPitchCorrection { processor, params } => {
-                                chain.set_link_pitch_correction(processor, params);
-                            }
-                            DspCommand::SetLinkDelay { processor, params } => {
-                                chain.set_link_delay(processor, params);
-                            }
-                            DspCommand::SetLinkReverb { processor, params } => {
-                                chain.set_link_reverb(processor, params);
-                            }
-                            DspCommand::SetLinkSaturator { processor, params } => {
-                                chain.set_link_saturator(processor, params);
-                            }
-                            DspCommand::SetLinkDynamicEq { processor, params } => {
-                                chain.set_link_dynamic_eq(processor, params);
-                            }
-                            DspCommand::SetLinkHarmonizer { processor, params } => {
-                                chain.set_link_harmonizer(processor, params);
-                            }
-                            DspCommand::SetLinkCompressor { processor, params } => {
-                                chain.set_link_compressor(processor, params);
-                            }
-                            DspCommand::SetLinkDeEsser { processor, params } => {
-                                chain.set_link_de_esser(processor, params);
-                            }
+                // 0) Aplicar comandos DSP pendientes (preset/bypass). El
+                //    `ApplyPreset` llega con la cadena ya construida; aquí
+                //    solo se intercambia y se libera la anterior.
+                while let Ok(command) = dsp_rx.try_recv() {
+                    match command {
+                        DspCommand::ApplyPreset(new_chain) => {
+                            chain = *new_chain;
+                        }
+                        DspCommand::SetGlobalBypass(bypass) => {
+                            chain.set_global_bypass(bypass);
+                        }
+                        DspCommand::SetLinkBypass { name, bypass } => {
+                            chain.set_link_bypass(&name, bypass);
+                        }
+                        DspCommand::SetLinkProcessor {
+                            name,
+                            processor,
+                            eq_bands,
+                        } => {
+                            chain.set_link_processor(&name, processor, eq_bands);
+                        }
+                        DspCommand::SetLinkGate { processor, params } => {
+                            chain.set_link_gate(processor, params);
+                        }
+                        DspCommand::SetDenoise { processor, params } => {
+                            chain.set_link_denoise(processor, params);
+                        }
+                        DspCommand::SetFeedbackSuppressor { processor, params } => {
+                            chain.set_link_feedback(processor, params);
+                        }
+                        DspCommand::SetPitchCorrection { processor, params } => {
+                            chain.set_link_pitch_correction(processor, params);
+                        }
+                        DspCommand::SetLinkDelay { processor, params } => {
+                            chain.set_link_delay(processor, params);
+                        }
+                        DspCommand::SetLinkReverb { processor, params } => {
+                            chain.set_link_reverb(processor, params);
+                        }
+                        DspCommand::SetLinkSaturator { processor, params } => {
+                            chain.set_link_saturator(processor, params);
+                        }
+                        DspCommand::SetLinkDynamicEq { processor, params } => {
+                            chain.set_link_dynamic_eq(processor, params);
+                        }
+                        DspCommand::SetLinkHarmonizer { processor, params } => {
+                            chain.set_link_harmonizer(processor, params);
+                        }
+                        DspCommand::SetLinkCompressor { processor, params } => {
+                            chain.set_link_compressor(processor, params);
+                        }
+                        DspCommand::SetLinkDeEsser { processor, params } => {
+                            chain.set_link_de_esser(processor, params);
                         }
                     }
+                }
 
-                    // 1) Cadena DSP: offloaded denoise o procesamiento inline.
-                    // Ajustar la longitud de scratch sin reasignar (la
-                    // capacidad preasignada es suficiente para cualquier
-                    // buffer de callback normal).
-                    if samples.len() > scratch.len() {
-                        scratch.resize(samples.len(), 0.0);
+                // 1) Cadena DSP: offloaded denoise o procesamiento inline.
+                // Ajustar la longitud de scratch sin reasignar (la
+                // capacidad preasignada es suficiente para cualquier
+                // buffer de callback normal).
+                if samples.len() > scratch.len() {
+                    scratch.resize(samples.len(), 0.0);
+                }
+                scratch.truncate(samples.len());
+                let info = ProcessingInfo {
+                    sample_rate,
+                    frames: samples.len(),
+                };
+
+                if chain.has_denoise() && denoise_handle.is_some() {
+                    // --- Modo offloaded: denoise en hilo dedicado ---
+                    // a) Procesar módulos pre-denoise (HighPass, etc.).
+                    if samples.len() > denoise_in_buf.len() {
+                        denoise_in_buf.resize(samples.len(), 0.0);
                     }
-                    scratch.truncate(samples.len());
-                    let info = ProcessingInfo {
-                        sample_rate,
-                        frames: samples.len(),
-                    };
+                    denoise_in_buf.truncate(samples.len());
+                    chain.process_pre_denoise(samples, &mut denoise_in_buf, &info);
 
-                    if chain.has_denoise() && denoise_handle.is_some() {
-                        // --- Modo offloaded: denoise en hilo dedicado ---
-                        // a) Procesar módulos pre-denoise (HighPass, etc.).
-                        if samples.len() > denoise_in_buf.len() {
-                            denoise_in_buf.resize(samples.len(), 0.0);
+                    // b) Enviar audio crudo al hilo de denoise.
+                    let _ = denoise_in_prod.push_slice(&denoise_in_buf);
+
+                    // c) Leer resultado denoiseado del ring de salida.
+                    if samples.len() > denoise_out_buf.len() {
+                        denoise_out_buf.resize(samples.len(), 0.0);
+                    }
+                    denoise_out_buf.truncate(samples.len());
+                    let n = denoise_out_cons.pop_slice(&mut denoise_out_buf);
+
+                    // d) Mezclar seco/húmedo y procesar módulos post-denoise.
+                    if n > 0 {
+                        let mix = denoise_shared.mix.load(Ordering::Relaxed);
+                        let dry = 1.0 - mix;
+                        for i in 0..n {
+                            denoise_out_buf[i] = denoise_in_buf[i] * dry + denoise_out_buf[i] * mix;
                         }
-                        denoise_in_buf.truncate(samples.len());
-                        chain.process_pre_denoise(samples, &mut denoise_in_buf, &info);
-
-                        // b) Enviar audio crudo al hilo de denoise.
-                        let _ = denoise_in_prod.push_slice(&denoise_in_buf);
-
-                        // c) Leer resultado denoiseado del ring de salida.
-                        if samples.len() > denoise_out_buf.len() {
-                            denoise_out_buf.resize(samples.len(), 0.0);
-                        }
-                        denoise_out_buf.truncate(samples.len());
-                        let n = denoise_out_cons.pop_slice(&mut denoise_out_buf);
-
-                        // d) Mezclar seco/húmedo y procesar módulos post-denoise.
-                        if n > 0 {
-                            let mix = denoise_shared.mix.load(Ordering::Relaxed);
-                            let dry = 1.0 - mix;
-                            for i in 0..n {
-                                denoise_out_buf[i] =
-                                    denoise_in_buf[i] * dry + denoise_out_buf[i] * mix;
-                            }
-                            chain.process_post_denoise(&denoise_out_buf[..n], &mut scratch, &info);
-                        } else {
-                            // Sin datos denoiseados aún: usar la señal pre-denoise
-                            // como fallback (degradación transparente).
-                            chain.process_post_denoise(&denoise_in_buf, &mut scratch, &info);
-                        }
+                        chain.process_post_denoise(&denoise_out_buf[..n], &mut scratch, &info);
                     } else {
-                        // --- Modo inline: cadena completa (sin denoise ONNX). ---
-                        chain.process(samples, &mut scratch, &info);
+                        // Sin datos denoiseados aún: usar la señal pre-denoise
+                        // como fallback (degradación transparente).
+                        chain.process_post_denoise(&denoise_in_buf, &mut scratch, &info);
                     }
+                } else {
+                    // --- Modo inline: cadena completa (sin denoise ONNX). ---
+                    chain.process(samples, &mut scratch, &info);
+                }
 
-                    // 2) Encolar la señal procesada hacia la salida.
-                    let pushed = producer.push_slice(&scratch);
-                    if pushed < scratch.len() && !overrun_warned {
-                        overrun_warned = true;
-                        let _ = tx_capture.send(EngineEvent::Warning {
-                            message: "input overrun: el buffer intermedio se llenó \
+                // 2) Encolar la señal procesada hacia la salida.
+                let pushed = producer.push_slice(&scratch);
+                if pushed < scratch.len() && !overrun_warned {
+                    overrun_warned = true;
+                    let _ = tx_capture.send(EngineEvent::Warning {
+                        message: "input overrun: el buffer intermedio se llenó \
                                       (aumenta el tamaño de buffer)"
-                                .into(),
-                        });
-                    }
-
-                    // 3) Análisis vocal: acumular bandas del audio crudo y
-                    //    extraer un marco cada intervalo (sin asignar memoria).
-                    splitter.process(samples);
-                    if last_frame_emit.elapsed() >= ANALYSIS_FRAME_INTERVAL {
-                        last_frame_emit = Instant::now();
-                        let frame = splitter.frame();
-                        let _ = analysis_frame_tx.try_send(frame);
-                    }
-
-                    // 4) Espectro: acumular la FFT (sin asignar) y emitir la
-                    //    última ventana de bandas acotada por tiempo.
-                    if let Some(bins) = spectrum.process(samples) {
-                        last_spectrum = bins;
-                    }
-                    if last_spectrum_emit.elapsed() >= SPECTRUM_EMIT_INTERVAL {
-                        last_spectrum_emit = Instant::now();
-                        let _ = tx_spectrum.send(EngineEvent::Spectrum(SpectrumSample {
-                            bins_db: last_spectrum,
-                            sample_rate,
-                            captured_at_ms: now_ms(),
-                        }));
-                    }
-
-                    // 5) Medir nivel de entrada y de salida (pre/post) y emitir
-                    //    evento, acotado por tiempo.
-                    let input_levels = level_meter.process(samples);
-                    let output_levels = output_meter.process(&scratch);
-                    if last_emit.elapsed() >= LEVEL_EMIT_INTERVAL {
-                        last_emit = Instant::now();
-                        let _ = tx_capture.send(EngineEvent::Level(LevelSample {
-                            input_rms_db: input_levels.rms_db,
-                            input_peak_db: input_levels.peak_db,
-                            output_rms_db: output_levels.rms_db,
-                            output_peak_db: output_levels.peak_db,
-                            latency_ms: f32::from_bits(last_latency_in.load(Ordering::Relaxed)),
-                            captured_at_ms: now_ms(),
-                        }));
-                    }
-                },
-                move |err| {
-                    let _ = tx_capture_errors.send(EngineEvent::Warning {
-                        message: format!("input stream: {err}"),
+                            .into(),
                     });
-                },
-                None,
-            )
-            .map_err(|e| Error::audio(format!("build input stream: {e}")))?;
+                }
+
+                // 3) Análisis vocal: acumular bandas del audio crudo y
+                //    extraer un marco cada intervalo (sin asignar memoria).
+                splitter.process(samples);
+                if last_frame_emit.elapsed() >= ANALYSIS_FRAME_INTERVAL {
+                    last_frame_emit = Instant::now();
+                    let frame = splitter.frame();
+                    let _ = analysis_frame_tx.try_send(frame);
+                }
+
+                // 4) Espectro: acumular la FFT (sin asignar) y emitir la
+                //    última ventana de bandas acotada por tiempo.
+                if let Some(bins) = spectrum.process(samples) {
+                    last_spectrum = bins;
+                }
+                if last_spectrum_emit.elapsed() >= SPECTRUM_EMIT_INTERVAL {
+                    last_spectrum_emit = Instant::now();
+                    let _ = tx_spectrum.send(EngineEvent::Spectrum(SpectrumSample {
+                        bins_db: last_spectrum,
+                        sample_rate,
+                        captured_at_ms: now_ms(),
+                    }));
+                }
+
+                // 5) Medir nivel de entrada y de salida (pre/post) y emitir
+                //    evento, acotado por tiempo.
+                let input_levels = level_meter.process(samples);
+                let output_levels = output_meter.process(&scratch);
+                if last_emit.elapsed() >= LEVEL_EMIT_INTERVAL {
+                    last_emit = Instant::now();
+                    let _ = tx_capture.send(EngineEvent::Level(LevelSample {
+                        input_rms_db: input_levels.rms_db,
+                        input_peak_db: input_levels.peak_db,
+                        output_rms_db: output_levels.rms_db,
+                        output_peak_db: output_levels.peak_db,
+                        latency_ms: f32::from_bits(last_latency_in.load(Ordering::Relaxed)),
+                        captured_at_ms: now_ms(),
+                    }));
+                }
+            },
+            move |err| {
+                let _ = tx_capture_errors.send(EngineEvent::Warning {
+                    message: format!("input stream: {err}"),
+                });
+            },
+            None,
+        );
+        log("stream de entrada: resultado obtenido");
+        let input_stream = input_result.map_err(|e| {
+            log(&format!("stream de entrada FALLÓ: {e}"));
+            Error::audio(format!("build input stream: {e}"))
+        })?;
         log("stream de ENTRADA abierto OK");
 
         // --- Stream de salida (playback) -------------------------------------
@@ -581,40 +583,43 @@ impl AudioEngine {
         let last_latency_out = last_latency.clone();
         let stop_output = stop.clone();
 
-        let output_stream = output
-            .build_output_stream::<f32, _, _>(
-                &output_config,
-                move |out: &mut [f32], _info: &cpal::OutputCallbackInfo| {
-                    if stop_output.load(Ordering::Relaxed) {
-                        return;
-                    }
+        let output_result = output.build_output_stream::<f32, _, _>(
+            &output_config,
+            move |out: &mut [f32], _info: &cpal::OutputCallbackInfo| {
+                if stop_output.load(Ordering::Relaxed) {
+                    return;
+                }
 
-                    // 1) Consumir la señal procesada; lo que no alcance queda a
-                    // cero (silencio) en ese callback.
-                    let consumed = consumer.pop_slice(out);
+                // 1) Consumir la señal procesada; lo que no alcance queda a
+                // cero (silencio) en ese callback.
+                let consumed = consumer.pop_slice(out);
 
-                    // 2) Latencia = muestras en vuelo → ms.
-                    let latency_ms = consumer.occupied_len() as f32 / sample_rate as f32 * 1000.0;
-                    last_latency_out.store(latency_ms.to_bits(), Ordering::Relaxed);
+                // 2) Latencia = muestras en vuelo → ms.
+                let latency_ms = consumer.occupied_len() as f32 / sample_rate as f32 * 1000.0;
+                last_latency_out.store(latency_ms.to_bits(), Ordering::Relaxed);
 
-                    // 3) Aviso único de underrun (buffer vacío = huecos de audio).
-                    if consumed < out.len() && !underflow_warned {
-                        underflow_warned = true;
-                        let _ = tx_output.send(EngineEvent::Warning {
-                            message: "output underrun: aumente el tamaño de buffer \
+                // 3) Aviso único de underrun (buffer vacío = huecos de audio).
+                if consumed < out.len() && !underflow_warned {
+                    underflow_warned = true;
+                    let _ = tx_output.send(EngineEvent::Warning {
+                        message: "output underrun: aumente el tamaño de buffer \
                                       para evitar huecos de audio"
-                                .into(),
-                        });
-                    }
-                },
-                move |err| {
-                    let _ = tx_output_errors.send(EngineEvent::Warning {
-                        message: format!("output stream: {err}"),
+                            .into(),
                     });
-                },
-                None,
-            )
-            .map_err(|e| Error::audio(format!("build output stream: {e}")))?;
+                }
+            },
+            move |err| {
+                let _ = tx_output_errors.send(EngineEvent::Warning {
+                    message: format!("output stream: {err}"),
+                });
+            },
+            None,
+        );
+        log("stream de salida: resultado obtenido");
+        let output_stream = output_result.map_err(|e| {
+            log(&format!("stream de salida FALLÓ: {e}"));
+            Error::audio(format!("build output stream: {e}"))
+        })?;
         log("stream de SALIDA abierto OK");
         // --- Hilo de análisis vocal --------------------------------------------
         // Consume los marcos del callback, desliza la ventana de métricas,
@@ -713,6 +718,7 @@ impl AudioEngine {
 
         let analysis_handle = AnalysisHandle::new(analysis_shared, dsp_handle.clone());
         log("hilo del motor lanzado");
+        log("AudioEngine::start completado con éxito");
 
         Ok((
             EngineHandle {
