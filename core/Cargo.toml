@@ -52,7 +52,15 @@ log = "0.4"
 cpal = { version = "0.16", optional = true, features = ["jack"] }
 ringbuf = { version = "0.4", optional = true }
 nnnoiseless = { version = "0.5", optional = true }
-ort = { version = "=2.0.0-rc.13", features = ["download-binaries"], optional = true }
+# ONNX Runtime + DeepFilterNet3 (mejor calidad, más peso). Requiere descargar
+# binarios de ONNX Runtime en la primera compilación.
+#
+# `default-features = false` + `tls-rustls` (en vez de `tls-native`): el build
+# script de ort-sys descarga los binarios con ureq; con native-tls enlazaba
+# openssl-sys y el enlazado fallaba si el sistema carece de libssl-dev.
+# `tls-rustls` usa ring (puro Rust, sin dependencias de sistema). Se replican
+# las demás features de default de ort para mantener el comportamiento.
+ort = { version = "=2.0.0-rc.13", features = ["download-binaries", "tls-rustls", "copy-dylibs", "api-27", "std", "ndarray", "tracing"], default-features = false, optional = true }
 ndarray = { version = "0.17", optional = true }
 ureq = { version = "3", optional = true }
 
