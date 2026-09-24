@@ -152,6 +152,10 @@ fn scale_intervals(scale: MusicalScale) -> &'static [i8] {
 /// `strength` (0–1) controla la intensidad: 0 = sin cambio, 1 = corrección
 /// completa. `strength` = 0.7 significa corregir el 70 % de la distancia.
 fn pitch_shift_ratio(f0: f32, scale: MusicalScale, root: MusicalNote, strength: f32) -> f32 {
+    if !f0.is_finite() || !strength.is_finite() {
+        return 1.0;
+    }
+    let strength = strength.clamp(0.0, 1.0);
     if f0 <= 0.0 || strength <= 0.0 {
         return 1.0;
     }
@@ -391,7 +395,17 @@ impl AudioProcessor for PitchCorrection {
     ) -> ProcessResult {
         let frames = input.len().min(output.len());
 
-        if self.params.strength <= 0.0 || self.params.mix <= 0.0 {
+        // Params no finitos (p. ej. de la red): degradar a passthrough en vez
+        // de propagar NaN. `<=` con NaN es `false`, así que el guard necesita
+        // `is_finite()` antes de la comparación.
+        if !self.params.strength.is_finite() || !self.params.mix.is_finite() {
+            output[..frames].copy_from_slice(&input[..frames]);
+            return ProcessResult { latency_ms: 0.0 };
+        }
+        let strength = self.params.strength.clamp(0.0, 1.0);
+        let mix = self.params.mix.clamp(0.0, 1.0);
+
+        if strength <= 0.0 || mix <= 0.0 {
             output[..frames].copy_from_slice(&input[..frames]);
             return ProcessResult { latency_ms: 0.0 };
         }
@@ -399,12 +413,7 @@ impl AudioProcessor for PitchCorrection {
         // 1) Detectar pitch del frame completo.
         if let Some(f0) = self.detector.feed_and_detect(input) {
             if f0 > 0.0 {
-                let ratio = pitch_shift_ratio(
-                    f0,
-                    self.params.scale,
-                    self.params.root,
-                    self.params.strength,
-                );
+                let ratio = pitch_shift_ratio(f0, self.params.scale, self.params.root, strength);
                 self.shifter.set_target_ratio(ratio);
             } else {
                 self.shifter.set_target_ratio(1.0);
@@ -415,10 +424,9 @@ impl AudioProcessor for PitchCorrection {
         self.shifter.process_block(input, output, frames);
 
         // 3) Mezclar seco/húmedo.
-        let wet = self.params.mix;
-        let dry = 1.0 - wet;
+        let dry = 1.0 - mix;
         for i in 0..frames {
-            output[i] = input[i] * dry + output[i] * wet;
+            output[i] = input[i] * dry + output[i] * mix;
         }
 
         ProcessResult {
@@ -521,6 +529,37 @@ mod tests {
         assert_eq!(result.latency_ms, 0.0);
         for (a, b) in input.iter().zip(output.iter()) {
             assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn pitch_correction_nan_params_degrade_to_passthrough() {
+        // Params de red no finitos: con el bug, `strength <= 0.0` es false con
+        // NaN → ratio NaN/inf dentro de PSOLA → salida corrupta/NaN.
+        for strength in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for mix in [f32::NAN, 1.0] {
+                let params = PitchCorrectionParams {
+                    scale: MusicalScale::Chromatic,
+                    root: MusicalNote::A,
+                    strength,
+                    mix,
+                };
+                let mut processor = PitchCorrection::new(params);
+                let input: Vec<f32> = (0..64).map(|i| (i as f32 * 0.1).sin() * 0.5).collect();
+                let mut output = vec![0.0; 64];
+                let info = ProcessingInfo {
+                    sample_rate: 48000,
+                    frames: 64,
+                };
+                processor.process(&input, &mut output, &info);
+                assert!(
+                    output.iter().all(|v| v.is_finite()),
+                    "salida NaN con strength={strength} mix={mix}"
+                );
+                for (a, b) in input.iter().zip(output.iter()) {
+                    assert!((a - b).abs() < 1e-6);
+                }
+            }
         }
     }
 

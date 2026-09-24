@@ -551,7 +551,15 @@ impl AudioEngine {
                         // tail), así que la cola se completa con la señal
                         // pre-denoise, igual que en el fallback de n == 0.
                         if n > 0 {
-                            let mix = denoise_shared.mix.load(Ordering::Relaxed);
+                            let raw_mix = denoise_shared.mix.load(Ordering::Relaxed);
+                            // El mix llega de parámetros de red: NaN/coords no
+                            // finitas o fuera de [0, 1] deben degradar a mix 0
+                            // (todo seco) en vez de contaminar la mezcla.
+                            let mix = if raw_mix.is_finite() {
+                                raw_mix.clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
                             let dry = 1.0 - mix;
                             for i in 0..n {
                                 denoise_out_buf[i] =

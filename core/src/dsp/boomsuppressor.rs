@@ -44,7 +44,13 @@ impl BoomSuppressor {
         Self {
             band,
             threshold_db,
-            amount: amount.clamp(0.0, 1.0),
+            // `amount` llega de la red: NaN/±inf → 0 (sin reducción) en vez de
+            // contaminar `gr_db` y la salida con NaN.
+            amount: if amount.is_finite() {
+                amount.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
             envelope: 0.0,
             attack_coef: time_to_coef(5.0, sr),
             release_coef: time_to_coef(120.0, sr),
@@ -161,6 +167,25 @@ mod tests {
             (rms_out - rms_in).abs() < rms_in * 0.2,
             "off-band signal altered: in={rms_in:.6}, out={rms_out:.6}"
         );
+    }
+
+    #[test]
+    fn nan_amount_degrades_to_passthrough() {
+        // `amount` no finito (de la red) con el bug producía `gr_db` NaN →
+        // salida NaN para siempre.
+        for amount in [f32::NAN, f32::INFINITY, 1e6] {
+            let mut boom = BoomSuppressor::new(-20.0, 250.0, amount, 48_000);
+            let mut out = vec![0.0; 8192];
+            let info = ProcessingInfo {
+                sample_rate: 48_000,
+                frames: 8192,
+            };
+            boom.process(&vec![0.5; 8192], &mut out, &info);
+            assert!(
+                out.iter().all(|v| v.is_finite()),
+                "salida NaN con amount={amount}"
+            );
+        }
     }
 
     fn rms(x: &[f32]) -> f32 {

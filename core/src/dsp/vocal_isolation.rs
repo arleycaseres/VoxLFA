@@ -134,8 +134,16 @@ impl AudioProcessor for VocalIsolation {
     ) -> ProcessResult {
         let frames = input.len().min(output.len());
 
+        // Params no finitos (p. ej. de la red): degradar a passthrough. Con
+        // NaN, `clamp(0.0, 1.0)` devuelve NaN y `<= 0.0` es `false` → NaN se
+        // propagaría por `comb_gain()`.
+        if !self.params.mix.is_finite() || !self.params.strength.is_finite() {
+            output[..frames].copy_from_slice(&input[..frames]);
+            return ProcessResult { latency_ms: 0.0 };
+        }
         let wet = self.params.mix.clamp(0.0, 1.0);
-        if wet <= 0.0 || self.params.strength.clamp(0.0, 1.0) <= 0.0 {
+        let strength = self.params.strength.clamp(0.0, 1.0);
+        if wet <= 0.0 || strength <= 0.0 {
             output[..frames].copy_from_slice(&input[..frames]);
             return ProcessResult { latency_ms: 0.0 };
         }
@@ -277,6 +285,29 @@ mod tests {
             .zip(input[3000..].iter())
             .any(|(a, b)| (a - b).abs() > 1e-3);
         assert!(changed, "el comb no alteró la señal con voz detectada");
+    }
+
+    #[test]
+    fn nan_params_degrade_to_passthrough() {
+        // Params de red no finitos: con el bug, `mix.clamp()` devuelve NaN y
+        // `wet <= 0.0` es false con NaN → `comb_gain()` computa NaN → salida
+        // con NaN.
+        for mix in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 2.0] {
+            for strength in [f32::NAN, 1.0] {
+                let mut v =
+                    VocalIsolation::from_params(VocalIsolationParams { strength, mix }, 48_000);
+                let input: Vec<f32> = (0..512).map(|i| (i as f32 * 0.1).sin() * 0.5).collect();
+                let mut out = vec![0.0; 512];
+                v.process(&input, &mut out, &info(512));
+                assert!(
+                    out.iter().all(|s| s.is_finite()),
+                    "salida NaN con mix={mix} strength={strength}"
+                );
+                for (a, b) in input.iter().zip(out.iter()) {
+                    assert!((a - b).abs() < 1e-6);
+                }
+            }
+        }
     }
 
     #[test]

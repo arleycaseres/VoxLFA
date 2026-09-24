@@ -42,7 +42,13 @@ impl DenoiseMix {
     fn new(inner: Box<dyn AudioProcessor>, mix: f32) -> Self {
         Self {
             inner,
-            mix: mix.clamp(0.0, 1.0),
+            // NaN/±inf desde la red degradan a mix 0 (todo seco) en vez de
+            // propagar NaN al blend (`clamp(0,1)` devuelve NaN con NaN).
+            mix: if mix.is_finite() {
+                mix.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
             denoised_buf: Vec::new(),
         }
     }
@@ -654,7 +660,13 @@ impl ChainProcessor {
         self.denoise_idx
             .and_then(|idx| self.links.get(idx))
             .and_then(|link| link.denoise_params)
-            .map(|params| params.mix)
+            .map(|params| {
+                if params.mix.is_finite() {
+                    params.mix.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            })
     }
 
     /// Procesa la cadena hasta el eslabón de denoise (excluyéndolo).

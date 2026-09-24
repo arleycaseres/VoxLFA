@@ -49,7 +49,13 @@ impl DynamicEqBand {
             ratio: params.ratio.max(1.0),
             attack_coef: time_to_coef(params.attack_ms, sr),
             release_coef: time_to_coef(params.release_ms, sr),
-            makeup_linear: 10f32.powf(params.makeup_db / 20.0),
+            // makeup_db llega de la red: NaN/±inf → 0 dB (sin makeup) en vez de
+            // `10.powf(NaN)` que contamina la señal para siempre.
+            makeup_linear: if params.makeup_db.is_finite() {
+                10f32.powf(params.makeup_db.clamp(-24.0, 24.0) / 20.0)
+            } else {
+                1.0
+            },
             envelope: 0.0,
             gr_smooth_db: 0.0,
         }
@@ -267,5 +273,36 @@ mod tests {
             rms_with > rms_without,
             "makeup should boost: with={rms_with:.6}, without={rms_without:.6}"
         );
+    }
+
+    #[test]
+    fn nan_params_degrade_to_safe_output() {
+        // Params de red no finitos: `makeup_db` NaN hacía `10.powf(NaN)` → gain
+        // NaN → la salida quedaba contaminada para siempre.
+        for makeup_db in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 1e6] {
+            let params = vec![DynamicEqBandParams {
+                freq_hz: 1000.0,
+                q: 0.7,
+                threshold_db: f32::NAN,
+                ratio: f32::NAN,
+                attack_ms: 0.5,
+                release_ms: 100.0,
+                makeup_db,
+            }];
+            let mut deq = DynamicEq::new(&params, 48_000);
+            let sample_rate = 48_000u32;
+            let input: Vec<f32> = (0..4800)
+                .map(|i| {
+                    0.5 * (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / sample_rate as f32)
+                        .sin()
+                })
+                .collect();
+            let mut out = vec![0.0; 4800];
+            deq.process(&input, &mut out, &info());
+            assert!(
+                out.iter().all(|v| v.is_finite()),
+                "salida NaN con makeup_db={makeup_db}"
+            );
+        }
     }
 }

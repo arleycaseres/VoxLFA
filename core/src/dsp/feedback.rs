@@ -264,10 +264,23 @@ impl FeedbackSuppressor {
         let hop_size = FFT_SIZE / 4;
         let n_bins = FFT_SIZE / 2 + 1;
 
+        // Params de red: no finitos o fuera de rango físico degradan a
+        // defaults seguros (no propagar NaN a `10.powf` ni alpha degenerado).
+        let threshold_db = if threshold_db.is_finite() {
+            threshold_db.clamp(-100.0, 0.0)
+        } else {
+            -30.0
+        };
+        let q = if q.is_finite() {
+            q.clamp(2.0, 30.0)
+        } else {
+            10.0
+        };
+
         Self {
             mode: FeedbackMode::Notch,
             threshold_db,
-            notches: std::array::from_fn(|_| AdaptiveNotch::new(sample_rate, q.max(2.0))),
+            notches: std::array::from_fn(|_| AdaptiveNotch::new(sample_rate, q)),
             ring: vec![0.0; FFT_SIZE],
             ring_pos: 0,
             samples_since_analysis: 0,
@@ -502,6 +515,37 @@ mod tests {
             ratio > 0.8 && ratio < 1.2,
             "señal silenciosa alterada: ratio={ratio}"
         );
+    }
+
+    #[test]
+    fn notch_clamps_network_params_to_safe_defaults() {
+        // Params de red no finitos o fuera de rango no deben propagar NaN a
+        // `10.powf(threshold_db/20)` ni degenerar los notch a inestables.
+        for threshold_db in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 50.0, -200.0] {
+            for q in [f32::NAN, f32::INFINITY, 0.0, 1e6] {
+                let params = FeedbackSuppressorParams {
+                    mode: FeedbackMode::Notch,
+                    threshold_db,
+                    q,
+                    mu: 0.1,
+                    filter_len: 256,
+                };
+                let mut proc = FeedbackSuppressor::from_params(params, 48_000);
+                let input: Vec<f32> = (0..2048)
+                    .map(|i| (2.0 * PI * 1000.0 * i as f32 / 48_000.0).sin() * 0.5)
+                    .collect();
+                let mut output = vec![0.0; 2048];
+                let info = ProcessingInfo {
+                    sample_rate: 48_000,
+                    frames: 2048,
+                };
+                proc.process(&input, &mut output, &info);
+                assert!(
+                    output.iter().all(|v| v.is_finite()),
+                    "salida NaN con threshold_db={threshold_db} q={q}"
+                );
+            }
+        }
     }
 
     #[test]
