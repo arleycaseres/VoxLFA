@@ -36,8 +36,8 @@ use crate::dsp::{
 };
 use crate::error::Error;
 use crate::protocol::{
-    AnalysisSample, AudioDeviceInfo, AudioHostInfo, EngineEvent, EngineState, EngineStatus,
-    LevelSample, PresetId, SpectrumSample, SPECTRUM_BIN_COUNT,
+    AnalysisSample, AudioDeviceInfo, AudioHostInfo, DspState, EngineEvent, EngineState,
+    EngineStatus, LevelSample, PresetId, SpectrumSample, SPECTRUM_BIN_COUNT,
 };
 use crate::Result;
 
@@ -88,6 +88,15 @@ const SCRATCH_MAX: usize = 4096;
 
 /// Latencia reportada antes de que haya señal circulando.
 const LATENCY_UNKNOWN: f32 = 0.0;
+
+/// Periodo de sondeo del hilo del motor (reenvío de comandos DSP y fallos).
+const ENGINE_POLL_MS: u64 = 20;
+
+/// Backoff inicial (ms) al reintentar abrir los streams tras un fallo.
+const BACKOFF_MIN_MS: u64 = 250;
+
+/// Tope del backoff exponencial (ms) al reintentar tras fallos repetidos.
+const BACKOFF_MAX_MS: u64 = 2000;
 
 /// Piso de dBFS para las bandas del espectro antes de la primera FFT.
 const SILENCE_DB: f32 = -120.0;
@@ -289,23 +298,18 @@ impl AudioEngine {
         let input_config = build_stream_config(&input, Direction::Input, buffer_size)?;
         let output_config = build_stream_config(&output, Direction::Output, buffer_size)?;
 
-        // Buffer de anillo lock-free: puente captura → salida.
-        let ring_capacity = sample_rate as usize * RING_CAPACITY_SECS as usize;
-        let (mut producer, mut consumer) = HeapRb::<f32>::new(ring_capacity).split();
-
         let stop = Arc::new(AtomicBool::new(false));
         // Latencia actual (ms), compartida entre los dos callbacks vía bits.
         let last_latency = Arc::new(AtomicU32::new(LATENCY_UNKNOWN.to_bits()));
 
-        // --- Canal de control DSP (UI → hilo de audio) ----------------------
-        // El hilo de audio lo consume con `try_recv()` en cada callback: una
-        // consulta sin espera. El hilo de control (UI) construye las nuevas
-        // cadenas y las envía ya listas, de modo que en el callback no se
-        // asigna memoria: solo se cambia el puntero y se libera la anterior.
+        // --- Canal de control DSP (UI → hilo del motor) ----------------------
+        // El hilo del motor lo consume con `recv_timeout` y reenvía cada
+        // comando al bundle de streams activo por su propio canal (ver
+        // `StreamBundle`). Así la cadena DSP vive dentro del bundle y puede
+        // reconstruirse intacta tras un fallo del stream de entrada
+        // (auto-recuperación) sin perder la configuración del usuario.
         let (dsp_tx, dsp_rx) = mpsc::channel::<DspCommand>();
         let max_frames = buffer_size.max(1);
-        let initial_chain = ChainProcessor::new(config.initial_preset, sample_rate, max_frames);
-        let initial_state = initial_chain.state();
         let dsp_handle = DspHandle::new(
             dsp_tx,
             tx.clone(),
@@ -313,6 +317,9 @@ impl AudioEngine {
             sample_rate,
             max_frames,
         );
+        // Último estado publicado por `DspHandle`: fuente para reconstruir la
+        // cadena DSP cuando el motor regenera los streams.
+        let dsp_shared_state = dsp_handle.shared_state();
 
         // --- Análisis vocal ---------------------------------------------------
         // El callback acumula bandas (sin asignación) y envía un marco por
@@ -331,295 +338,30 @@ impl AudioEngine {
             enabled: AtomicBool::new(false),
             mix: AtomicF32::new(0.0),
         });
-        let stop_denoise = Arc::new(AtomicBool::new(false));
-        let mut denoise_handle: Option<DenoiseHandle> = None;
 
-        // Buffers reutilizables para denoise en el callback (misma
-        // capacidad generosa que `scratch` para evitar reasignaciones).
-        let mut denoise_in_buf = vec![0.0f32; SCRATCH_MAX];
-        let mut denoise_out_buf = vec![0.0f32; SCRATCH_MAX];
-
-        // Ring buffers para comunicación callback ↔ hilo de denoise.
-        // Siempre se crean (el callback los ignora si no hay hilo).
-        let (mut denoise_in_prod, denoise_in_cons) =
-            HeapRb::<f32>::new(DENOISE_RING_CAPACITY).split();
-        let (denoise_out_prod, mut denoise_out_cons) =
-            HeapRb::<f32>::new(DENOISE_RING_CAPACITY).split();
-
-        // Lanzar el hilo de denoise si el preset tiene denoise y los modelos
-        // ONNX están disponibles.
-        if initial_chain.has_denoise() {
-            match denoise_thread::spawn_denoise_thread(
-                build_denoise_processor(sample_rate, max_frames),
-                sample_rate,
-                denoise_in_cons,
-                denoise_out_prod,
-                denoise_shared.clone(),
-                stop_denoise.clone(),
-            ) {
-                Ok(handle) => {
-                    denoise_handle = Some(handle);
-                }
-                Err(e) => {
-                    log::warn!("denoise offload failed, using inline: {e}");
-                }
-            }
-        }
-
-        // --- Stream de entrada (captura) -------------------------------------
-        let mut level_meter = LevelMeter::new();
-        let mut output_meter = LevelMeter::new();
-        let mut chain = initial_chain;
-        // Buffer reutilizable para la salida de la cadena DSP. Se
-        // preasigna con capacidad generosa (SCRATCH_MAX ≈ 85 ms a 48 kHz)
-        // para no reasignar si el dispositivo USB entrega callbacks más
-        // grandes que el buffer nominal. La longitud real se ajusta con
-        // `truncate` y `resize` solo crece si es estrictamente necesario.
-        let mut scratch = vec![0.0f32; SCRATCH_MAX];
-        let mut last_emit = Instant::now();
-        let mut overrun_warned = false;
-        let tx_capture = tx.clone();
-        let tx_capture_errors = tx.clone();
-        let stop_capture = stop.clone();
-        let last_latency_in = last_latency.clone();
-
-        // Análisis vocal: divisor de bandas del callback + canal hacia el hilo.
-        let mut splitter = BandSplitter::new(sample_rate);
-        let mut last_frame_emit = Instant::now();
-        let analysis_frame_tx = analysis_tx.clone();
-
-        // Espectro (FFT): analizador sin asignación en el callback; las bandas
-        // más recientes se copian y se emiten acotadas por tiempo.
-        let mut spectrum = SpectrumAnalyzer::new(sample_rate);
-        let mut last_spectrum = [SILENCE_DB; SPECTRUM_BIN_COUNT];
-        let mut last_spectrum_emit = Instant::now();
-        let tx_spectrum = tx.clone();
-
+        // --- Bundle de streams (captura + reproducción) ----------------------
+        // El contexto agrupa los dispositivos, las configuraciones y el estado
+        // DSP compartido; a partir de él se construye (y regenera) cada bundle.
         log("config de streams lista");
-        let input_result = input.build_input_stream::<f32, _, _>(
-            &input_config,
-            move |samples: &[f32], _info: &cpal::InputCallbackInfo| {
-                // Este callback corre en el hilo de audio: O(n), sin
-                // bloqueos ni asignaciones.
-                if samples.is_empty() || stop_capture.load(Ordering::Relaxed) {
-                    return;
-                }
+        let ctx = BundleBuildCtx {
+            input,
+            input_config,
+            output,
+            output_config,
+            sample_rate,
+            max_frames,
+            dsp_state: dsp_shared_state,
+            denoise_shared,
+            stop: stop.clone(),
+            last_latency: last_latency.clone(),
+            analysis_tx: analysis_tx.clone(),
+            event_tx: tx.clone(),
+        };
+        let (bundle_init, fault_rx_init) = build_bundle(&ctx)?;
+        log("bundle de streams abierto OK");
 
-                // 0) Aplicar comandos DSP pendientes (preset/bypass). El
-                //    `ApplyPreset` llega con la cadena ya construida; aquí
-                //    solo se intercambia y se libera la anterior.
-                while let Ok(command) = dsp_rx.try_recv() {
-                    match command {
-                        DspCommand::ApplyPreset(new_chain) => {
-                            chain = *new_chain;
-                        }
-                        DspCommand::SetGlobalBypass(bypass) => {
-                            chain.set_global_bypass(bypass);
-                        }
-                        DspCommand::SetLinkBypass { name, bypass } => {
-                            chain.set_link_bypass(&name, bypass);
-                        }
-                        DspCommand::SetLinkProcessor {
-                            name,
-                            processor,
-                            eq_bands,
-                        } => {
-                            chain.set_link_processor(&name, processor, eq_bands);
-                        }
-                        DspCommand::SetLinkGate { processor, params } => {
-                            chain.set_link_gate(processor, params);
-                        }
-                        DspCommand::SetDenoise { processor, params } => {
-                            chain.set_link_denoise(processor, params);
-                        }
-                        DspCommand::SetFeedbackSuppressor { processor, params } => {
-                            chain.set_link_feedback(processor, params);
-                        }
-                        DspCommand::SetPitchCorrection { processor, params } => {
-                            chain.set_link_pitch_correction(processor, params);
-                        }
-                        DspCommand::SetLinkDelay { processor, params } => {
-                            chain.set_link_delay(processor, params);
-                        }
-                        DspCommand::SetLinkReverb { processor, params } => {
-                            chain.set_link_reverb(processor, params);
-                        }
-                        DspCommand::SetLinkSaturator { processor, params } => {
-                            chain.set_link_saturator(processor, params);
-                        }
-                        DspCommand::SetLinkDynamicEq { processor, params } => {
-                            chain.set_link_dynamic_eq(processor, params);
-                        }
-                        DspCommand::SetLinkHarmonizer { processor, params } => {
-                            chain.set_link_harmonizer(processor, params);
-                        }
-                        DspCommand::SetLinkCompressor { processor, params } => {
-                            chain.set_link_compressor(processor, params);
-                        }
-                        DspCommand::SetLinkDeEsser { processor, params } => {
-                            chain.set_link_de_esser(processor, params);
-                        }
-                    }
-                }
-
-                // 1) Cadena DSP: offloaded denoise o procesamiento inline.
-                // Ajustar la longitud de scratch sin reasignar (la
-                // capacidad preasignada es suficiente para cualquier
-                // buffer de callback normal).
-                if samples.len() > scratch.len() {
-                    scratch.resize(samples.len(), 0.0);
-                }
-                scratch.truncate(samples.len());
-                let info = ProcessingInfo {
-                    sample_rate,
-                    frames: samples.len(),
-                };
-
-                if chain.has_denoise() && denoise_handle.is_some() {
-                    // --- Modo offloaded: denoise en hilo dedicado ---
-                    // a) Procesar módulos pre-denoise (HighPass, etc.).
-                    if samples.len() > denoise_in_buf.len() {
-                        denoise_in_buf.resize(samples.len(), 0.0);
-                    }
-                    denoise_in_buf.truncate(samples.len());
-                    chain.process_pre_denoise(samples, &mut denoise_in_buf, &info);
-
-                    // b) Enviar audio crudo al hilo de denoise.
-                    let _ = denoise_in_prod.push_slice(&denoise_in_buf);
-
-                    // c) Leer resultado denoiseado del ring de salida.
-                    if samples.len() > denoise_out_buf.len() {
-                        denoise_out_buf.resize(samples.len(), 0.0);
-                    }
-                    denoise_out_buf.truncate(samples.len());
-                    let n = denoise_out_cons.pop_slice(&mut denoise_out_buf);
-
-                    // d) Mezclar seco/húmedo y procesar módulos post-denoise.
-                    if n > 0 {
-                        let mix = denoise_shared.mix.load(Ordering::Relaxed);
-                        let dry = 1.0 - mix;
-                        for i in 0..n {
-                            denoise_out_buf[i] = denoise_in_buf[i] * dry + denoise_out_buf[i] * mix;
-                        }
-                        chain.process_post_denoise(&denoise_out_buf[..n], &mut scratch, &info);
-                    } else {
-                        // Sin datos denoiseados aún: usar la señal pre-denoise
-                        // como fallback (degradación transparente).
-                        chain.process_post_denoise(&denoise_in_buf, &mut scratch, &info);
-                    }
-                } else {
-                    // --- Modo inline: cadena completa (sin denoise ONNX). ---
-                    chain.process(samples, &mut scratch, &info);
-                }
-
-                // 2) Encolar la señal procesada hacia la salida.
-                let pushed = producer.push_slice(&scratch);
-                if pushed < scratch.len() && !overrun_warned {
-                    overrun_warned = true;
-                    let _ = tx_capture.send(EngineEvent::Warning {
-                        message: "input overrun: el buffer intermedio se llenó \
-                                      (aumenta el tamaño de buffer)"
-                            .into(),
-                    });
-                }
-
-                // 3) Análisis vocal: acumular bandas del audio crudo y
-                //    extraer un marco cada intervalo (sin asignar memoria).
-                splitter.process(samples);
-                if last_frame_emit.elapsed() >= ANALYSIS_FRAME_INTERVAL {
-                    last_frame_emit = Instant::now();
-                    let frame = splitter.frame();
-                    let _ = analysis_frame_tx.try_send(frame);
-                }
-
-                // 4) Espectro: acumular la FFT (sin asignar) y emitir la
-                //    última ventana de bandas acotada por tiempo.
-                if let Some(bins) = spectrum.process(samples) {
-                    last_spectrum = bins;
-                }
-                if last_spectrum_emit.elapsed() >= SPECTRUM_EMIT_INTERVAL {
-                    last_spectrum_emit = Instant::now();
-                    let _ = tx_spectrum.send(EngineEvent::Spectrum(SpectrumSample {
-                        bins_db: last_spectrum,
-                        sample_rate,
-                        captured_at_ms: now_ms(),
-                    }));
-                }
-
-                // 5) Medir nivel de entrada y de salida (pre/post) y emitir
-                //    evento, acotado por tiempo.
-                let input_levels = level_meter.process(samples);
-                let output_levels = output_meter.process(&scratch);
-                if last_emit.elapsed() >= LEVEL_EMIT_INTERVAL {
-                    last_emit = Instant::now();
-                    let _ = tx_capture.send(EngineEvent::Level(LevelSample {
-                        input_rms_db: input_levels.rms_db,
-                        input_peak_db: input_levels.peak_db,
-                        output_rms_db: output_levels.rms_db,
-                        output_peak_db: output_levels.peak_db,
-                        latency_ms: f32::from_bits(last_latency_in.load(Ordering::Relaxed)),
-                        captured_at_ms: now_ms(),
-                    }));
-                }
-            },
-            move |err| {
-                let _ = tx_capture_errors.send(EngineEvent::Warning {
-                    message: format!("input stream: {err}"),
-                });
-            },
-            None,
-        );
-        log("stream de entrada: resultado obtenido");
-        let input_stream = input_result.map_err(|e| {
-            log(&format!("stream de entrada FALLÓ: {e}"));
-            Error::audio(format!("build input stream: {e}"))
-        })?;
-        log("stream de ENTRADA abierto OK");
-
-        // --- Stream de salida (playback) -------------------------------------
-        let mut underflow_warned = false;
-        let tx_output = tx.clone();
-        let tx_output_errors = tx.clone();
-        let last_latency_out = last_latency.clone();
-        let stop_output = stop.clone();
-
-        let output_result = output.build_output_stream::<f32, _, _>(
-            &output_config,
-            move |out: &mut [f32], _info: &cpal::OutputCallbackInfo| {
-                if stop_output.load(Ordering::Relaxed) {
-                    return;
-                }
-
-                // 1) Consumir la señal procesada; lo que no alcance queda a
-                // cero (silencio) en ese callback.
-                let consumed = consumer.pop_slice(out);
-
-                // 2) Latencia = muestras en vuelo → ms.
-                let latency_ms = consumer.occupied_len() as f32 / sample_rate as f32 * 1000.0;
-                last_latency_out.store(latency_ms.to_bits(), Ordering::Relaxed);
-
-                // 3) Aviso único de underrun (buffer vacío = huecos de audio).
-                if consumed < out.len() && !underflow_warned {
-                    underflow_warned = true;
-                    let _ = tx_output.send(EngineEvent::Warning {
-                        message: "output underrun: aumente el tamaño de buffer \
-                                      para evitar huecos de audio"
-                            .into(),
-                    });
-                }
-            },
-            move |err| {
-                let _ = tx_output_errors.send(EngineEvent::Warning {
-                    message: format!("output stream: {err}"),
-                });
-            },
-            None,
-        );
-        log("stream de salida: resultado obtenido");
-        let output_stream = output_result.map_err(|e| {
-            log(&format!("stream de salida FALLÓ: {e}"));
-            Error::audio(format!("build output stream: {e}"))
-        })?;
+        // Estado inicial de la cadena DSP (se difunde una vez en Running).
+        let initial_state = dsp_handle.get_state()?;
         log("stream de SALIDA abierto OK");
         // --- Hilo de análisis vocal --------------------------------------------
         // Consume los marcos del callback, desliza la ventana de métricas,
@@ -676,19 +418,23 @@ impl AudioEngine {
                 })?
         };
 
-        // --- Hilo del motor: mantiene vivos los streams y gestiona el ciclo ---
+        // --- Hilo del motor: mantiene vivo el bundle y gestiona el ciclo ------
+        // Consume los comandos DSP del hilo de control y los reenvía al bundle
+        // activo; detecta fallos del stream de entrada y regenera los streams
+        // desde el estado compartido (auto-recuperación con backoff).
         let host_name = config.audio_host.clone();
-        let tx_thread = tx.clone();
-        let stop_thread = stop.clone();
         let thread = thread::Builder::new()
             .name("voxlfa-audio-engine".to_string())
             .spawn(move || {
-                // La propiedad de los streams vive aquí: si se soltaran, cpal
-                // cerraría los dispositivos y el audio se detendría.
-                let _capture = input_stream;
-                let _playback = output_stream;
+                // El bundle posee los streams y su hilo de denoise: al
+                // reemplazarlo, cpal cierra los dispositivos y se liberan los
+                // recursos del bundle anterior.
+                let mut bundle = bundle_init;
+                let mut fault_rx = fault_rx_init;
+                let mut backoff_ms = BACKOFF_MIN_MS;
+                let mut waiting = false;
 
-                let _ = tx_thread.send(status_event(
+                let _ = ctx.event_tx.send(status_event(
                     EngineState::Running,
                     sample_rate,
                     buffer_size,
@@ -699,13 +445,33 @@ impl AudioEngine {
                 ));
 
                 // Estado inicial de la cadena DSP (una vez en Running).
-                let _ = tx_thread.send(EngineEvent::Dsp(initial_state));
+                let _ = ctx.event_tx.send(EngineEvent::Dsp(initial_state));
 
-                while !stop_thread.load(Ordering::Relaxed) {
-                    thread::sleep(Duration::from_millis(200));
+                while !ctx.stop.load(Ordering::Relaxed) {
+                    // 1) Reenviar comandos DSP al bundle activo.
+                    match dsp_rx.recv_timeout(Duration::from_millis(ENGINE_POLL_MS)) {
+                        Ok(command) => {
+                            if bundle.dsp_tx.send(command).is_err() {
+                                log::warn!("canal DSP del bundle cerrado; regenerando streams");
+                                waiting = true;
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+
+                    // 2) Fallos del stream de entrada: regenerar con backoff.
+                    while let Ok(msg) = fault_rx.try_recv() {
+                        log::warn!("fallo del stream de entrada: {msg}");
+                        waiting = true;
+                    }
+                    if waiting {
+                        waiting = !regenerate(&mut bundle, &mut fault_rx, &mut backoff_ms, &ctx);
+                    }
                 }
 
-                let _ = tx_thread.send(status_event(
+                bundle.shutdown();
+                let _ = ctx.event_tx.send(status_event(
                     EngineState::Stopped,
                     sample_rate,
                     buffer_size,
@@ -728,6 +494,423 @@ impl AudioEngine {
             dsp_handle,
             analysis_handle,
         ))
+    }
+}
+
+/// Contexto fijo del motor para construir (y regenerar) bundles de streams.
+///
+/// Todo lo que no cambia entre reconstrucciones vive aquí: dispositivos,
+/// configuraciones y el estado DSP compartido que publica `DspHandle` (la
+/// fuente para reconstruir la cadena del usuario tras un fallo de captura).
+struct BundleBuildCtx {
+    /// Dispositivo de entrada (micrófono).
+    input: cpal::Device,
+    /// Configuración del stream de entrada.
+    input_config: cpal::StreamConfig,
+    /// Dispositivo de salida (altavoces/interfaz).
+    output: cpal::Device,
+    /// Configuración del stream de salida.
+    output_config: cpal::StreamConfig,
+    /// Frecuencia de muestreo común (Hz).
+    sample_rate: u32,
+    /// Tamaño máximo de frame que la cadena DSP debe soportar.
+    max_frames: usize,
+    /// Último estado DSP publicado; cada bundle reconstruye su cadena desde aquí.
+    dsp_state: Arc<Mutex<DspState>>,
+    /// Estado del denoise offloaded (enabled/mix), compartido por los bundles.
+    denoise_shared: Arc<DenoiseShared>,
+    /// Flag de detención del motor.
+    stop: Arc<AtomicBool>,
+    /// Latencia actual en vuelo (bits), compartida entre los callbacks.
+    last_latency: Arc<AtomicU32>,
+    /// Canal hacia el hilo de análisis vocal.
+    analysis_tx: mpsc::SyncSender<VoiceFrame>,
+    /// Canal de eventos del motor hacia la UI (niveles, espectro, avisos…).
+    event_tx: mpsc::Sender<EngineEvent>,
+}
+
+/// Bundle de streams (captura + reproducción) con su cadena DSP propia.
+///
+/// El bundle posee los dos streams de cpal y el hilo de denoise offloaded; al
+/// reemplazarlo o soltarlo se cierran los dispositivos. Contiene también el
+/// canal de comandos DSP que consume su callback de captura (el hilo del motor
+/// reenvía ahí los comandos del hilo de control, con canales nuevos por bundle
+/// para que la regeneración no pierda comandos en vuelo).
+struct StreamBundle {
+    /// Stream de captura (entrada), se cierra al soltar el bundle.
+    #[allow(dead_code)]
+    capture: cpal::Stream,
+    /// Stream de reproducción (salida), se cierra al soltar el bundle.
+    #[allow(dead_code)]
+    playback: cpal::Stream,
+    /// Canal de comandos DSP consumido por el callback de captura.
+    dsp_tx: mpsc::Sender<DspCommand>,
+    /// Hilo de denoise offloaded (`None` si el preset no tiene denoise).
+    denoise: Option<DenoiseHandle>,
+}
+
+impl StreamBundle {
+    /// Detiene el hilo de denoise del bundle (si existe).
+    ///
+    /// Los streams de cpal se cierran automáticamente al soltar el bundle;
+    /// este método solo frena el hilo de denoise, que de otro modo seguiría
+    /// vivo hasta el apagado del motor.
+    fn shutdown(&mut self) {
+        if let Some(handle) = self.denoise.take() {
+            handle.stop();
+        }
+    }
+}
+
+/// Construye un bundle de streams con la cadena DSP reconstruida desde el
+/// estado compartido.
+///
+/// Devuelve el bundle y el receptor de fallos del stream de entrada: cuando la
+/// captura reporta un error, el hilo del motor regenera el bundle completo
+/// (auto-recuperación).
+fn build_bundle(ctx: &BundleBuildCtx) -> Result<(StreamBundle, mpsc::Receiver<String>)> {
+    let sample_rate = ctx.sample_rate;
+    let max_frames = ctx.max_frames;
+
+    // Cadena DSP reconstruida desde el último estado publicado por `DspHandle`:
+    // preset, bypasses y parámetros del usuario sobreviven a la regeneración.
+    let state = ctx
+        .dsp_state
+        .lock()
+        .map(|guard| guard.clone())
+        .map_err(|_| Error::audio("dsp shared state lock poisoned"))?;
+    let mut chain = ChainProcessor::from_state(&state, sample_rate, max_frames);
+
+    // Ring buffer lock-free del bundle: puente captura → salida.
+    let ring_capacity = sample_rate as usize * RING_CAPACITY_SECS as usize;
+    let (mut producer, mut consumer) = HeapRb::<f32>::new(ring_capacity).split();
+
+    // Canales propios del bundle: comandos DSP (los reenvía el hilo del motor)
+    // y fallos del stream de entrada (los consume el hilo del motor).
+    let (dsp_tx, dsp_rx) = mpsc::channel::<DspCommand>();
+    let (fault_tx, fault_rx) = mpsc::channel::<String>();
+
+    // Buffers y anillos para el denoise offloaded del bundle.
+    let mut denoise_in_buf = vec![0.0f32; SCRATCH_MAX];
+    let mut denoise_out_buf = vec![0.0f32; SCRATCH_MAX];
+    let (mut denoise_in_prod, denoise_in_cons) = HeapRb::<f32>::new(DENOISE_RING_CAPACITY).split();
+    let (denoise_out_prod, mut denoise_out_cons) =
+        HeapRb::<f32>::new(DENOISE_RING_CAPACITY).split();
+
+    // Lanzar el hilo de denoise si el preset reconstruido lo incluye y los
+    // modelos están disponibles; si falla, el callback usa el modo inline.
+    let mut denoise_handle = None;
+    if chain.has_denoise() {
+        match denoise_thread::spawn_denoise_thread(
+            build_denoise_processor(sample_rate, max_frames),
+            sample_rate,
+            denoise_in_cons,
+            denoise_out_prod,
+            ctx.denoise_shared.clone(),
+            ctx.stop.clone(),
+        ) {
+            Ok(handle) => denoise_handle = Some(handle),
+            Err(e) => log::warn!("denoise offload failed, using inline: {e}"),
+        }
+    }
+    // El callback consulta la presencia del hilo con una copia inmutable.
+    let denoise_ready = denoise_handle.is_some();
+
+    // --- Stream de entrada (captura) -------------------------------------
+    let mut level_meter = LevelMeter::new();
+    let mut output_meter = LevelMeter::new();
+    // Buffer reutilizable para la salida de la cadena DSP. Se preasigna con
+    // capacidad generosa (SCRATCH_MAX ≈ 85 ms a 48 kHz) para no reasignar si
+    // el dispositivo USB entrega callbacks más grandes que el buffer nominal.
+    let mut scratch = vec![0.0f32; SCRATCH_MAX];
+    let mut last_emit = Instant::now();
+    let mut overrun_warned = false;
+    let tx_capture = ctx.event_tx.clone();
+    let tx_spectrum = ctx.event_tx.clone();
+    let capture_fault = fault_tx;
+    let stop_capture = ctx.stop.clone();
+    let last_latency_in = ctx.last_latency.clone();
+
+    // Análisis vocal: divisor de bandas del callback + canal hacia el hilo.
+    let mut splitter = BandSplitter::new(sample_rate);
+    let mut last_frame_emit = Instant::now();
+    let analysis_frame_tx = ctx.analysis_tx.clone();
+
+    // Espectro (FFT): analizador sin asignación en el callback; las bandas
+    // más recientes se copian y se emiten acotadas por tiempo.
+    let mut spectrum = SpectrumAnalyzer::new(sample_rate);
+    let mut last_spectrum = [SILENCE_DB; SPECTRUM_BIN_COUNT];
+    let mut last_spectrum_emit = Instant::now();
+
+    let denoise_shared_cb = ctx.denoise_shared.clone();
+
+    let input_result = ctx.input.build_input_stream::<f32, _, _>(
+        &ctx.input_config,
+        move |samples: &[f32], _info: &cpal::InputCallbackInfo| {
+            // Este callback corre en el hilo de audio: O(n), sin bloqueos ni
+            // asignaciones.
+            if samples.is_empty() || stop_capture.load(Ordering::Relaxed) {
+                return;
+            }
+
+            // 0) Aplicar comandos DSP pendientes (preset/bypass). El
+            //    `ApplyPreset` llega con la cadena ya construida; aquí solo se
+            //    intercambia y se libera la anterior.
+            while let Ok(command) = dsp_rx.try_recv() {
+                match command {
+                    DspCommand::ApplyPreset(new_chain) => {
+                        chain = *new_chain;
+                    }
+                    DspCommand::SetGlobalBypass(bypass) => {
+                        chain.set_global_bypass(bypass);
+                    }
+                    DspCommand::SetLinkBypass { name, bypass } => {
+                        chain.set_link_bypass(&name, bypass);
+                    }
+                    DspCommand::SetLinkProcessor {
+                        name,
+                        processor,
+                        eq_bands,
+                    } => {
+                        chain.set_link_processor(&name, processor, eq_bands);
+                    }
+                    DspCommand::SetLinkGate { processor, params } => {
+                        chain.set_link_gate(processor, params);
+                    }
+                    DspCommand::SetDenoise { processor, params } => {
+                        chain.set_link_denoise(processor, params);
+                    }
+                    DspCommand::SetFeedbackSuppressor { processor, params } => {
+                        chain.set_link_feedback(processor, params);
+                    }
+                    DspCommand::SetPitchCorrection { processor, params } => {
+                        chain.set_link_pitch_correction(processor, params);
+                    }
+                    DspCommand::SetLinkDelay { processor, params } => {
+                        chain.set_link_delay(processor, params);
+                    }
+                    DspCommand::SetLinkReverb { processor, params } => {
+                        chain.set_link_reverb(processor, params);
+                    }
+                    DspCommand::SetLinkSaturator { processor, params } => {
+                        chain.set_link_saturator(processor, params);
+                    }
+                    DspCommand::SetLinkDynamicEq { processor, params } => {
+                        chain.set_link_dynamic_eq(processor, params);
+                    }
+                    DspCommand::SetLinkHarmonizer { processor, params } => {
+                        chain.set_link_harmonizer(processor, params);
+                    }
+                    DspCommand::SetLinkCompressor { processor, params } => {
+                        chain.set_link_compressor(processor, params);
+                    }
+                    DspCommand::SetLinkDeEsser { processor, params } => {
+                        chain.set_link_de_esser(processor, params);
+                    }
+                }
+            }
+
+            // 1) Cadena DSP: offloaded denoise o procesamiento inline. Ajustar
+            //    la longitud de scratch sin reasignar (la capacidad preasignada
+            //    es suficiente para cualquier buffer de callback normal).
+            if samples.len() > scratch.len() {
+                scratch.resize(samples.len(), 0.0);
+            }
+            scratch.truncate(samples.len());
+            let info = ProcessingInfo {
+                sample_rate,
+                frames: samples.len(),
+            };
+
+            if chain.has_denoise() && denoise_ready {
+                // --- Modo offloaded: denoise en hilo dedicado ---
+                // a) Procesar módulos pre-denoise (HighPass, etc.).
+                if samples.len() > denoise_in_buf.len() {
+                    denoise_in_buf.resize(samples.len(), 0.0);
+                }
+                denoise_in_buf.truncate(samples.len());
+                chain.process_pre_denoise(samples, &mut denoise_in_buf, &info);
+
+                // b) Enviar audio crudo al hilo de denoise.
+                let _ = denoise_in_prod.push_slice(&denoise_in_buf);
+
+                // c) Leer resultado denoiseado del ring de salida.
+                if samples.len() > denoise_out_buf.len() {
+                    denoise_out_buf.resize(samples.len(), 0.0);
+                }
+                denoise_out_buf.truncate(samples.len());
+                let n = denoise_out_cons.pop_slice(&mut denoise_out_buf);
+
+                // d) Mezclar seco/húmedo y procesar módulos post-denoise.
+                if n > 0 {
+                    let mix = denoise_shared_cb.mix.load(Ordering::Relaxed);
+                    let dry = 1.0 - mix;
+                    for i in 0..n {
+                        denoise_out_buf[i] = denoise_in_buf[i] * dry + denoise_out_buf[i] * mix;
+                    }
+                    chain.process_post_denoise(&denoise_out_buf[..n], &mut scratch, &info);
+                } else {
+                    // Sin datos denoiseados aún: usar la señal pre-denoise
+                    // como fallback (degradación transparente).
+                    chain.process_post_denoise(&denoise_in_buf, &mut scratch, &info);
+                }
+            } else {
+                // --- Modo inline: cadena completa (sin denoise ONNX). ---
+                chain.process(samples, &mut scratch, &info);
+            }
+
+            // 2) Encolar la señal procesada hacia la salida.
+            let pushed = producer.push_slice(&scratch);
+            if pushed < scratch.len() && !overrun_warned {
+                overrun_warned = true;
+                let _ = tx_capture.send(EngineEvent::Warning {
+                    message: "input overrun: el buffer intermedio se llenó \
+                                  (aumenta el tamaño de buffer)"
+                        .into(),
+                });
+            }
+
+            // 3) Análisis vocal: acumular bandas del audio crudo y extraer un
+            //    marco cada intervalo (sin asignar memoria).
+            splitter.process(samples);
+            if last_frame_emit.elapsed() >= ANALYSIS_FRAME_INTERVAL {
+                last_frame_emit = Instant::now();
+                let frame = splitter.frame();
+                let _ = analysis_frame_tx.try_send(frame);
+            }
+
+            // 4) Espectro: acumular la FFT (sin asignar) y emitir la última
+            //    ventana de bandas acotada por tiempo.
+            if let Some(bins) = spectrum.process(samples) {
+                last_spectrum = bins;
+            }
+            if last_spectrum_emit.elapsed() >= SPECTRUM_EMIT_INTERVAL {
+                last_spectrum_emit = Instant::now();
+                let _ = tx_spectrum.send(EngineEvent::Spectrum(SpectrumSample {
+                    bins_db: last_spectrum,
+                    sample_rate,
+                    captured_at_ms: now_ms(),
+                }));
+            }
+
+            // 5) Medir nivel de entrada y de salida (pre/post) y emitir
+            //    evento, acotado por tiempo.
+            let input_levels = level_meter.process(samples);
+            let output_levels = output_meter.process(&scratch);
+            if last_emit.elapsed() >= LEVEL_EMIT_INTERVAL {
+                last_emit = Instant::now();
+                let _ = tx_capture.send(EngineEvent::Level(LevelSample {
+                    input_rms_db: input_levels.rms_db,
+                    input_peak_db: input_levels.peak_db,
+                    output_rms_db: output_levels.rms_db,
+                    output_peak_db: output_levels.peak_db,
+                    latency_ms: f32::from_bits(last_latency_in.load(Ordering::Relaxed)),
+                    captured_at_ms: now_ms(),
+                }));
+            }
+        },
+        move |err| {
+            // Fallo del stream de entrada → el hilo del motor regenera el
+            // bundle (auto-recuperación con backoff).
+            let _ = capture_fault.send(err.to_string());
+        },
+        None,
+    );
+
+    // --- Stream de salida (playback) -------------------------------------
+    let mut underflow_warned = false;
+    let tx_output = ctx.event_tx.clone();
+    let tx_output_errors = ctx.event_tx.clone();
+    let last_latency_out = ctx.last_latency.clone();
+    let stop_output = ctx.stop.clone();
+
+    let output_result = ctx.output.build_output_stream::<f32, _, _>(
+        &ctx.output_config,
+        move |out: &mut [f32], _info: &cpal::OutputCallbackInfo| {
+            if stop_output.load(Ordering::Relaxed) {
+                return;
+            }
+
+            // 1) Consumir la señal procesada; lo que no alcance queda a cero
+            //    (silencio) en ese callback.
+            let consumed = consumer.pop_slice(out);
+
+            // 2) Latencia = muestras en vuelo → ms.
+            let latency_ms = consumer.occupied_len() as f32 / sample_rate as f32 * 1000.0;
+            last_latency_out.store(latency_ms.to_bits(), Ordering::Relaxed);
+
+            // 3) Aviso único de underrun (buffer vacío = huecos de audio).
+            if consumed < out.len() && !underflow_warned {
+                underflow_warned = true;
+                let _ = tx_output.send(EngineEvent::Warning {
+                    message: "output underrun: aumente el tamaño de buffer \
+                                  para evitar huecos de audio"
+                        .into(),
+                });
+            }
+        },
+        move |err| {
+            let _ = tx_output_errors.send(EngineEvent::Warning {
+                message: format!("output stream: {err}"),
+            });
+        },
+        None,
+    );
+
+    let input_stream =
+        input_result.map_err(|e| Error::audio(format!("build input stream: {e}")))?;
+    let output_stream =
+        output_result.map_err(|e| Error::audio(format!("build output stream: {e}")))?;
+
+    Ok((
+        StreamBundle {
+            capture: input_stream,
+            playback: output_stream,
+            dsp_tx,
+            denoise: denoise_handle,
+        },
+        fault_rx,
+    ))
+}
+
+/// Regenera el bundle de streams tras un fallo de captura (auto-recuperación).
+///
+/// Detiene el bundle antiguo e intenta abrir uno nuevo desde el estado DSP
+/// compartido. En caso de error aplica backoff exponencial acotado (duerme
+/// antes de devolver) y devuelve `false`; el hilo del motor reintenta en la
+/// siguiente iteración manteniendo el backoff.
+fn regenerate(
+    bundle: &mut StreamBundle,
+    fault_rx: &mut mpsc::Receiver<String>,
+    backoff_ms: &mut u64,
+    ctx: &BundleBuildCtx,
+) -> bool {
+    if !ctx.stop.load(Ordering::Relaxed) {
+        let _ = ctx.event_tx.send(EngineEvent::Warning {
+            message: "el stream de entrada se interrumpió; regenerando streams \
+                      (auto-recuperación)"
+                .into(),
+        });
+    }
+
+    bundle.shutdown();
+    match build_bundle(ctx) {
+        Ok((next, next_fault)) => {
+            *bundle = next;
+            *fault_rx = next_fault;
+            *backoff_ms = BACKOFF_MIN_MS;
+            let _ = ctx.event_tx.send(EngineEvent::Warning {
+                message: "streams regenerados correctamente".into(),
+            });
+            true
+        }
+        Err(e) => {
+            log::warn!("regen de streams falló: {e}");
+            let wait = *backoff_ms;
+            thread::sleep(Duration::from_millis(wait));
+            *backoff_ms = (wait * 2).min(BACKOFF_MAX_MS);
+            false
+        }
     }
 }
 
@@ -904,13 +1087,20 @@ fn supports_sample_rate(device: &cpal::Device, direction: Direction, rate: u32) 
 /// Construye la configuración de stream de un dispositivo.
 ///
 /// Pide un tamaño de buffer fijo (baja latencia) solo si el dispositivo lo
-/// soporta; en otro caso deja el predeterminado del sistema.
+/// acepta de verdad; en otro caso degrada a un tamaño mayor o al
+/// predeterminado del sistema.
+///
+/// El rango que reporta cpal es "teórico" (constraints globales del device);
+/// ALSA puede rechazar luego el `snd_pcm_hw_params_set_buffer_size` con EINVAL
+/// al fijar period/rate/canales reales — p. ej. buffer 64 en algunos USB.
+/// Por eso se **sondea** el backend con un stream descartable: hereda el mismo
+/// punto de fallo y permite degradar sin tumbar todo el arranque.
 fn build_stream_config(
     device: &cpal::Device,
     direction: Direction,
     buffer_size: usize,
 ) -> Result<cpal::StreamConfig> {
-    use cpal::{BufferSize, SupportedBufferSize};
+    use cpal::BufferSize;
 
     let default = match direction {
         Direction::Input => device.default_input_config(),
@@ -918,20 +1108,89 @@ fn build_stream_config(
     }
     .map_err(|e| Error::audio(format!("default {direction} config: {e}")))?;
 
-    let buffer_size = match default.buffer_size() {
-        SupportedBufferSize::Range { min, max }
-            if (buffer_size as u32) >= *min && (buffer_size as u32) <= *max =>
-        {
-            BufferSize::Fixed(buffer_size as u32)
-        }
-        _ => BufferSize::Default,
-    };
-
-    Ok(cpal::StreamConfig {
+    let mut config = cpal::StreamConfig {
         channels: default.channels(),
         sample_rate: default.sample_rate(),
-        buffer_size,
-    })
+        buffer_size: BufferSize::Default,
+    };
+
+    if let cpal::SupportedBufferSize::Range { min, max } = default.buffer_size() {
+        if (buffer_size as u32) >= *min && (buffer_size as u32) <= *max {
+            config.buffer_size = BufferSize::Fixed(buffer_size as u32);
+        }
+    }
+
+    // Si el Fixed es rechazado por el backend, se prueban potencias de dos
+    // mayores (latencia aún razonable) y, agotadas, el Default del sistema.
+    if matches!(&config.buffer_size, BufferSize::Fixed(_))
+        && !probe_stream_accepts(device, direction, &config)
+    {
+        log::warn!("[start] {direction}: buffer de {buffer_size} px rechazado por el backend");
+        let fallbacks = fallback_buffer_sizes(buffer_size as u32, default.buffer_size());
+        let mut degraded = None;
+        for candidate in &fallbacks {
+            config.buffer_size = *candidate;
+            if probe_stream_accepts(device, direction, &config) {
+                degraded = Some(*candidate);
+                break;
+            }
+        }
+        match degraded {
+            Some(chosen) => log::warn!("[start] {direction}: se usará {chosen:?}"),
+            None => {
+                log::warn!("[start] {direction}: se usará el tamaño predeterminado del sistema");
+            }
+        }
+    }
+
+    Ok(config)
+}
+
+/// Tamaños de respaldo a probar cuando el dispositivo rechaza el pedido:
+/// potencias de dos por encima del pedido (hasta el máximo soportado) y, como
+/// último recurso, `BufferSize::Default`.
+fn fallback_buffer_sizes(
+    requested: u32,
+    supported: &cpal::SupportedBufferSize,
+) -> Vec<cpal::BufferSize> {
+    use cpal::BufferSize;
+
+    let mut candidates = Vec::new();
+    if let cpal::SupportedBufferSize::Range { max, .. } = supported {
+        let mut size = requested.saturating_mul(2);
+        while size <= *max {
+            candidates.push(BufferSize::Fixed(size));
+            match size.checked_mul(2) {
+                Some(next) => size = next,
+                None => break,
+            }
+        }
+    }
+    candidates.push(BufferSize::Default);
+    candidates
+}
+
+/// Comprueba si el backend acepta `config` construyendo y descartando de
+/// inmediato un stream con callbacks vacíos.
+///
+/// La apertura aplica los `hw_params` (donde ALSA devuelve el EINVAL por el
+/// tamaño de buffer), de modo que un rechazo se detecta aquí igual que en el
+/// stream real, sin consumir estado del motor. El stream de prueba no se
+/// arranca (`play`), solo se configura, y se libera al caer.
+fn probe_stream_accepts(
+    device: &cpal::Device,
+    direction: Direction,
+    config: &cpal::StreamConfig,
+) -> bool {
+    let built = match direction {
+        Direction::Input => device
+            .build_input_stream::<f32, _, _>(config, |_, _| {}, |_| {}, None)
+            .map(drop),
+        Direction::Output => device
+            .build_output_stream::<f32, _, _>(config, |_: &mut [f32], _| {}, |_| {}, None)
+            .map(drop),
+    };
+    built.is_ok()
 }
 
 /// Tiempo monotónico (ms) desde la época del sistema, para graficar muestras.
@@ -1041,5 +1300,52 @@ mod tests {
             heuristic_buffer_size("BuiltIn Microphone", "BuiltIn Output"),
             256
         );
+    }
+
+    #[test]
+    fn fallback_propaga_potencias_de_dos_hasta_el_maximo() {
+        use cpal::{BufferSize, SupportedBufferSize};
+
+        let supported = SupportedBufferSize::Range { min: 16, max: 256 };
+        assert_eq!(
+            fallback_buffer_sizes(64, &supported),
+            vec![
+                BufferSize::Fixed(128),
+                BufferSize::Fixed(256),
+                BufferSize::Default,
+            ]
+        );
+    }
+
+    #[test]
+    fn fallback_con_pedido_en_el_maximo_solo_ofrece_default() {
+        use cpal::{BufferSize, SupportedBufferSize};
+
+        let supported = SupportedBufferSize::Range { min: 16, max: 128 };
+        assert_eq!(
+            fallback_buffer_sizes(256, &supported),
+            vec![BufferSize::Default]
+        );
+        // Cero / rango no-Range: Default como único respaldo.
+        let rhsk = SupportedBufferSize::Range { min: 16, max: 128 };
+        assert_eq!(fallback_buffer_sizes(0, &rhsk), vec![BufferSize::Default]);
+    }
+
+    #[test]
+    fn fallback_respeta_maximo_infinito_y_no_desborda() {
+        use cpal::{BufferSize, SupportedBufferSize};
+
+        let supported = SupportedBufferSize::Range {
+            min: 16,
+            max: u32::MAX,
+        };
+        let candidates = fallback_buffer_sizes(64, &supported);
+        // No debe desbordar ni producir valores con overflow.
+        assert!(candidates.len() >= 4);
+        assert_eq!(candidates.last(), Some(&BufferSize::Default));
+        assert!(matches!(
+            candidates[candidates.len() - 2],
+            BufferSize::Fixed(_)
+        ));
     }
 }

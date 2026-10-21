@@ -168,6 +168,160 @@ impl ChainProcessor {
         chain
     }
 
+    /// Reconstruye una cadena equivalente a un [`DspState`] declarativo.
+    ///
+    /// Se usa en la auto-recuperación del motor de audio: el hilo del motor
+    /// guarda el último estado que publicó [`DspHandle`] y, al reconstruir los
+    /// streams tras un fallo (p. ej. `POLLERR` del backend ALSA), regenera una
+    /// cadena con exactamente los mismos preset, ajustes finos y bypasses que
+    /// dejó el usuario.
+    pub fn from_state(state: &DspState, sample_rate: u32, max_frames: usize) -> Self {
+        let mut chain = ChainProcessor::new(state.preset, sample_rate, max_frames);
+        for link in &state.links {
+            match link.name.as_str() {
+                "eq" => {
+                    if let Some(bands) = &link.eq_bands {
+                        if !bands.is_empty() {
+                            chain.set_link_processor(
+                                "eq",
+                                Box::new(ParametricEq::new(bands.clone(), sample_rate, max_frames)),
+                                Some(bands.clone()),
+                            );
+                        }
+                    }
+                }
+                "noisegate" => {
+                    if let Some(params) = link.gate_params {
+                        chain.set_link_gate(
+                            Box::new(NoiseGate::new(
+                                params.threshold_db,
+                                params.attack_ms,
+                                params.release_ms,
+                                params.hold_ms,
+                                params.range_db,
+                                sample_rate,
+                            )),
+                            params,
+                        );
+                    }
+                }
+                "denoise" => {
+                    if let Some(params) = link.denoise_params {
+                        let inner: Box<dyn AudioProcessor> = {
+                            #[cfg(feature = "rnnoise")]
+                            {
+                                Box::new(RnnoiseDenoise::new())
+                            }
+                            #[cfg(not(feature = "rnnoise"))]
+                            {
+                                Box::new(super::passthrough::PassThroughProcessor::default())
+                            }
+                        };
+                        chain
+                            .set_link_denoise(Box::new(DenoiseMix::new(inner, params.mix)), params);
+                    }
+                }
+                "feedback" => {
+                    if let Some(params) = link.feedback_params {
+                        chain.set_link_feedback(
+                            Box::new(FeedbackSuppressor::from_params(params, sample_rate)),
+                            params,
+                        );
+                    }
+                }
+                "pitch_correction" => {
+                    if let Some(params) = link.pitch_correction_params {
+                        chain.set_link_pitch_correction(
+                            Box::new(super::pitch_correction::PitchCorrection::new(params)),
+                            params,
+                        );
+                    }
+                }
+                "delay" => {
+                    if let Some(params) = link.delay_params {
+                        chain.set_link_delay(
+                            Box::new(super::delay::Delay::from_params(params, sample_rate)),
+                            params,
+                        );
+                    }
+                }
+                "reverb" => {
+                    if let Some(params) = link.reverb_params {
+                        chain.set_link_reverb(
+                            Box::new(super::reverb::Reverb::from_params(params, sample_rate)),
+                            params,
+                        );
+                    }
+                }
+                "saturator" => {
+                    if let Some(params) = link.saturator_params {
+                        chain.set_link_saturator(
+                            Box::new(Saturator::from_params(
+                                params.mode,
+                                params.drive,
+                                params.mix,
+                                sample_rate,
+                            )),
+                            params,
+                        );
+                    }
+                }
+                "dynamic_eq" => {
+                    if let Some(params) = &link.dynamic_eq_params {
+                        chain.set_link_dynamic_eq(
+                            Box::new(DynamicEq::from_params(params, sample_rate)),
+                            params.clone(),
+                        );
+                    }
+                }
+                "harmonizer" => {
+                    if let Some(params) = &link.harmonizer_params {
+                        chain.set_link_harmonizer(
+                            Box::new(Harmonizer::from_params(params, sample_rate)),
+                            params.clone(),
+                        );
+                    }
+                }
+                "compressor" => {
+                    if let Some(params) = link.compressor_params {
+                        chain.set_link_compressor(
+                            Box::new(Compressor::new(
+                                params.threshold_db,
+                                params.ratio,
+                                params.attack_ms,
+                                params.release_ms,
+                                params.makeup_db,
+                                sample_rate,
+                            )),
+                            params,
+                        );
+                    }
+                }
+                "deesser" => {
+                    if let Some(params) = link.de_esser_params {
+                        chain.set_link_de_esser(
+                            Box::new(DeEsser::new(
+                                params.threshold_db,
+                                params.freq_hz,
+                                params.amount,
+                                sample_rate,
+                            )),
+                            params,
+                        );
+                    }
+                }
+                _ => {}
+            }
+            if link.bypass {
+                chain.set_link_bypass(&link.name, true);
+            }
+        }
+        if state.global_bypass {
+            chain.set_global_bypass(true);
+        }
+        chain
+    }
+
     /// Reconstruye la cadena para un preset (desde el hilo de control/audio).
     pub fn apply_preset(&mut self, preset: PresetId) {
         self.preset = preset;
@@ -1286,6 +1440,12 @@ impl DspHandle {
             .lock()
             .map(|guard| guard.clone())
             .map_err(|_| Error::audio("dsp state lock poisoned"))
+    }
+
+    /// Acceso al estado compartido (arcos) para reconstruir la cadena DSP
+    /// cuando el motor regenera los streams (auto-recuperación).
+    pub fn shared_state(&self) -> Arc<Mutex<DspState>> {
+        self.state.clone()
     }
 
     /// Envía un comando al hilo de audio (sin construir cadenas nuevas).
